@@ -1,0 +1,134 @@
+# Hisse Senedi Yön Tahmini Sistemi - Konfigürasyon
+
+# Veri Kaynakları
+DATA_SOURCES:
+  twelve_data_api_key: "YOUR_TWELVE_DATA_API_KEY"
+  yfinance_enabled: true
+  
+# Hedef Hisse Senetleri (BIST100'den örnekler)
+TARGET_STOCKS:
+  - "THYAO.IS"  # Türk Hava Yolları
+  - "AKBNK.IS"  # Akbank
+  - "BIMAS.IS"  # BİM
+  - "EREGL.IS"  # Ereğli Demir Çelik
+  - "FONET.IS"  # Fonet Teknoloji
+  - "GARAN.IS"  # Garanti BBVA
+  - "ISCTR.IS"  # İş Bankası
+  - "KRDMD.IS"  # Kardemir
+  - "PETKM.IS"  # Petkim
+  - "SAHOL.IS"  # Sabancı Holding
+  - "TUPRS.IS"  # Tüpraş
+
+# Model Parametreleri
+MODEL_CONFIG:
+  prediction_horizon: 1  # 1 gün sonrası tahmin
+  lookback_window: 30    # Son 30 günlük veri
+  train_test_split: 0.8  # %80 train, %20 test
+  min_volume_threshold: 1000000  # Minimum günlük hacim
+  
+  # Volatilite Bazlı Model Parametreleri
+  VOLATILITY_CONFIGS:
+    # Düşük Volatilite (%0-25)
+    LOW_VOLATILITY:
+      max_depth: 4
+      learning_rate: 0.05
+      n_estimators: 200
+      subsample: 0.7
+      colsample_bytree: 0.7
+      min_child_weight: 5
+      reg_alpha: 0.1
+      reg_lambda: 0.1
+      target_threshold: 0.01  # %1+ hareket
+      
+    # Orta Volatilite (%25-40)
+    MEDIUM_VOLATILITY:
+      max_depth: 3
+      learning_rate: 0.03
+      n_estimators: 150
+      subsample: 0.6
+      colsample_bytree: 0.6
+      min_child_weight: 3
+      reg_alpha: 0.2
+      reg_lambda: 0.2
+      target_threshold: 0.015  # %1.5+ hareket
+      
+    # Yüksek Volatilite (%40-60)
+    HIGH_VOLATILITY:
+      max_depth: 2
+      learning_rate: 0.02
+      n_estimators: 100
+      subsample: 0.5
+      colsample_bytree: 0.5
+      min_child_weight: 1
+      reg_alpha: 0.3
+      reg_lambda: 0.3
+      target_threshold: 0.02  # %2+ hareket
+      
+    # Çok Yüksek Volatilite (%60+)
+    VERY_HIGH_VOLATILITY:
+      max_depth: 2
+      learning_rate: 0.01
+      n_estimators: 80
+      subsample: 0.4
+      colsample_bytree: 0.4
+      min_child_weight: 1
+      reg_alpha: 0.5
+      reg_lambda: 0.5
+      target_threshold: 0.03  # %3+ hareket
+  
+# Risk Yönetimi
+RISK_MANAGEMENT:
+  # Volatilite Bazlı Risk Parametreleri
+  VOLATILITY_RISK_CONFIGS:
+    # Düşük Volatilite (%0-25)
+    LOW_VOLATILITY:
+      max_position_size: 0.05    # %5 pozisyon
+      stop_loss_pct: 0.03       # %3 stop loss
+      take_profit_pct: 0.06      # %6 take profit
+      max_daily_trades: 3        # Günlük 3 işlem
+      confidence_threshold: 0.60  # %60 güven eşiği
+      
+    # Orta Volatilite (%25-40)
+    MEDIUM_VOLATILITY:
+      max_position_size: 0.04    # %4 pozisyon
+      stop_loss_pct: 0.05       # %5 stop loss
+      take_profit_pct: 0.10      # %10 take profit
+      max_daily_trades: 2        # Günlük 2 işlem
+      confidence_threshold: 0.55  # %55 güven eşiği
+      
+    # Yüksek Volatilite (%40-60)
+    HIGH_VOLATILITY:
+      max_position_size: 0.03    # %3 pozisyon
+      stop_loss_pct: 0.08       # %8 stop loss
+      take_profit_pct: 0.15      # %15 take profit
+      max_daily_trades: 2        # Günlük 2 işlem
+      confidence_threshold: 0.45  # %45 güven eşiği
+      
+    # Çok Yüksek Volatilite (%60+)
+    VERY_HIGH_VOLATILITY:
+      max_position_size: 0.02    # %2 pozisyon
+      stop_loss_pct: 0.12       # %12 stop loss
+      take_profit_pct: 0.25      # %25 take profit
+      max_daily_trades: 1        # Günlük 1 işlem
+      confidence_threshold: 0.35  # %35 güven eşiği
+      
+  # Varsayılan parametreler (geriye uyumluluk için)
+  max_position_size: 0.80  # Maksimum %80 pozisyon (çok büyük)
+  stop_loss_pct: 0.40      # %40 stop loss (çok gevşek)
+  take_profit_pct: 0.80    # %80 take profit (çok gevşek)
+  max_daily_trades: 1      # Günlük maksimum işlem sayısı (çok az)
+  
+# Backtesting
+BACKTEST_CONFIG:
+  start_date: "2020-01-01"
+  end_date: "2024-01-01"
+  initial_capital: 100000  # 100K TL başlangıç sermayesi
+  commission_rate: 0.0000  # %0 komisyon (test amaçlı)
+  slippage_rate: 0.0000    # %0 slippage (test amaçlı)
+  
+# Telegram Bildirimleri
+TELEGRAM:
+  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
+  chat_id: "YOUR_CHAT_ID"
+  enabled: false
+
