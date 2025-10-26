@@ -13,3 +13,4 @@ seaborn>=0.13.0
 requests>=2.31.0
 python-dotenv>=1.0.0
 ta>=0.10.2
+python-docx>=0.8.11
