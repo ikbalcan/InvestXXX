@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Data files (büyük dosyalar GitHub'a yüklenmemeli)
+data/raw/*.csv
+data/processed/*.csv
+data/features/*.csv
+
+# Model files (büyük - optional, gerekirse yüklenebilir)
+src/models/*.joblib
+
+# Logs
+logs/*.log
+logs/*.png
+logs/*.docx
+logs/*.pdf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+secrets.txt
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+

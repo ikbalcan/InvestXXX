@@ -646,7 +646,7 @@ def main():
     
     with tab3:
         # 🎯 Hisse Avcısı - Toplu analiz ve karşılaştırma
-        show_stock_hunter_tab(bist_stocks, all_symbols, config)
+        show_stock_hunter_tab(bist_stocks, all_symbols, config, interval=interval)
     
     with tab4:
         # 💼 Paper Trading & Portföy Yönetimi

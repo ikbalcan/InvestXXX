@@ -26,26 +26,32 @@ from price_target_predictor import PriceTargetPredictor
 from dashboard_utils import load_config, load_stock_data
 
 @st.cache_data(ttl=300)  # 5 dakika cache
-def load_stock_data_cached(symbol, period="1y"):
+def load_stock_data_cached(symbol, period="1y", interval="1d"):
     """Hisse verilerini cache'li olarak yükle"""
     try:
-        return load_stock_data(symbol, period)
+        return load_stock_data(symbol, period, interval=interval)
     except Exception as e:
         st.error(f"❌ {symbol} verisi yüklenemedi: {str(e)}")
         return pd.DataFrame()
 
 
-def analyze_single_stock(symbol, config, period="1y"):
+def analyze_single_stock(symbol, config, period="1y", interval="1d"):
     """Tek hisse analizi - Thread-safe"""
     try:
         # Veri yükle
-        data = load_stock_data_cached(symbol, period)
+        data = load_stock_data_cached(symbol, period, interval=interval)
         if data.empty:
             return None
         
         # Özellikler oluştur
         try:
-            engineer = FeatureEngineer(config)
+            # Interval'ı config'e ekle
+            config_with_interval = config.copy()
+            if 'MODEL_CONFIG' not in config_with_interval:
+                config_with_interval['MODEL_CONFIG'] = {}
+            config_with_interval['MODEL_CONFIG']['interval'] = interval
+            
+            engineer = FeatureEngineer(config_with_interval)
             features_df = engineer.create_all_features(data)
         except Exception as e:
             st.error(f"❌ {symbol} özellikler oluşturulamadı: {str(e)}")
@@ -192,14 +198,14 @@ def analyze_single_stock(symbol, config, period="1y"):
         st.error(f"❌ {symbol} analizi başarısız: {str(e)}")
         return None
 
-def train_model_for_symbol(symbol, config, progress_callback=None):
+def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"):
     """Tek hisse için model eğitimi"""
     try:
         if progress_callback:
             progress_callback(f"📊 {symbol} verisi yükleniyor...")
         
         # Veri yükle
-        data = load_stock_data(symbol, "2y")
+        data = load_stock_data(symbol, "2y", interval=interval)
         if data.empty:
             return False, f"{symbol} verisi yüklenemedi"
         
@@ -208,7 +214,13 @@ def train_model_for_symbol(symbol, config, progress_callback=None):
         
         # Özellikler oluştur
         try:
-            engineer = FeatureEngineer(config)
+            # Interval'ı config'e ekle
+            config_with_interval = config.copy()
+            if 'MODEL_CONFIG' not in config_with_interval:
+                config_with_interval['MODEL_CONFIG'] = {}
+            config_with_interval['MODEL_CONFIG']['interval'] = interval
+            
+            engineer = FeatureEngineer(config_with_interval)
             features_df = engineer.create_all_features(data)
         except Exception as e:
             return False, f"{symbol} özellikler oluşturulamadı: {str(e)}"
@@ -247,7 +259,7 @@ def train_model_for_symbol(symbol, config, progress_callback=None):
     except Exception as e:
         return False, f"{symbol} model eğitimi başarısız: {str(e)}"
 
-def train_models_batch(symbols, config, progress_container):
+def train_models_batch(symbols, config, progress_container, interval="1d"):
     """Toplu model eğitimi - Progress bar ile"""
     results = []
     total_symbols = len(symbols)
@@ -262,7 +274,7 @@ def train_models_batch(symbols, config, progress_container):
         progress_bar.progress(progress)
         
         # Model eğit
-        success, message = train_model_for_symbol(symbol, config, status_text.text)
+        success, message = train_model_for_symbol(symbol, config, status_text.text, interval)
         results.append({
             'symbol': symbol,
             'success': success,
@@ -274,7 +286,7 @@ def train_models_batch(symbols, config, progress_container):
     
     return results
 
-def analyze_multiple_stocks(symbols, config, max_workers=5):
+def analyze_multiple_stocks(symbols, config, max_workers=5, interval="1d"):
     """Çoklu hisse analizi - Paralel işlem"""
     results = []
     
@@ -282,7 +294,7 @@ def analyze_multiple_stocks(symbols, config, max_workers=5):
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Tüm hisseleri paralel olarak analiz et
             future_to_symbol = {
-                executor.submit(analyze_single_stock, symbol, config): symbol 
+                executor.submit(analyze_single_stock, symbol, config, "1y", interval): symbol 
                 for symbol in symbols
             }
             
@@ -461,10 +473,11 @@ def create_stock_comparison_chart(results_df):
     )
     return fig
 
-def show_stock_hunter_tab(bist_stocks, all_symbols, config):
+def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d"):
     """Hisse Avcısı Tab"""
     
     st.markdown('<h2 class="section-title">🎯 Hisse Avcısı - BIST Avı</h2>', unsafe_allow_html=True)
+    st.info(f"⏰ **Zaman Dilimi:** {interval}")
     
     st.info("""
     🔍 **Hisse Avcısı Nedir?**
@@ -625,7 +638,7 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config):
                     progress_container = st.container()
                     
                     # Model eğitimi başlat
-                    training_results = train_models_batch(symbols_to_train, config, progress_container)
+                    training_results = train_models_batch(symbols_to_train, config, progress_container, interval)
                     
                     # Sonuçları göster
                     successful_trainings = [r for r in training_results if r['success']]
@@ -647,7 +660,7 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config):
                     st.success("✅ Tüm hisseler için güncel modeller mevcut!")
             
             # Analizi başlat
-            results = analyze_multiple_stocks(selected_symbols, config)
+            results = analyze_multiple_stocks(selected_symbols, config, interval=interval)
             
             if results:
                 # DataFrame oluştur

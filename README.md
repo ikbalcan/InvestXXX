@@ -91,8 +91,30 @@ python main.py signals --model-path src/models/model.joblib
 
 ```bash
 # Streamlit dashboard başlat
-streamlit run dashboard.py
+streamlit run dashboard_main.py
 ```
+
+### 7. Yayınlama (Production)
+
+#### Streamlit Cloud (Ücretsiz & En Kolay):
+```bash
+# 1. GitHub'a push et
+git add .
+git commit -m "Deploy to Streamlit Cloud"
+git push origin main
+
+# 2. Streamlit Cloud'a git: https://share.streamlit.io
+# 3. GitHub repo'yu bağla
+# 4. Main file: dashboard_main.py seç
+# 5. Deploy!
+```
+
+Detaylı rehber için: `YAYINA_ALMA_REHBERI.md` dosyasını okuyun.
+
+#### Alternatif Yayın Yöntemleri:
+- **Railway.app**: Otomatik CI/CD, ücretsiz tier
+- **Heroku**: Klasik PaaS, ücretsiz basic tier
+- **VPS/Kendi Sunucu**: Tam kontrol
 
 ## 📊 Kullanım Örnekleri
 
