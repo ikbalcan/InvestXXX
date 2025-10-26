@@ -316,4 +316,11 @@ def main():
         raise
 
 if __name__ == "__main__":
-    main()
+    # Import and run the Streamlit dashboard
+    try:
+        from dashboard_main import main as run_dashboard
+        run_dashboard()
+    except Exception as e:
+        logger.error(f"Could not run dashboard: {e}")
+        # Fallback to CLI
+        main()
