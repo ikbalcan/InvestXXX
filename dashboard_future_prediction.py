@@ -18,6 +18,7 @@ from feature_engineering import FeatureEngineer
 from model_train import StockDirectionPredictor
 from price_target_predictor import PriceTargetPredictor
 from dashboard_utils import load_config, load_stock_data
+from src.export_utils import create_export_buttons
 
 @st.cache_data
 def create_features(data):
@@ -371,6 +372,62 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
     
     return factors
 
+def train_model_for_symbol(symbol, config, progress_callback=None):
+    """Tek hisse için model eğitimi"""
+    try:
+        if progress_callback:
+            progress_callback(f"📊 {symbol} verisi yükleniyor...")
+        
+        # Veri yükle
+        data = load_stock_data(symbol, "2y")
+        if data.empty:
+            return False, f"{symbol} verisi yüklenemedi"
+        
+        if progress_callback:
+            progress_callback(f"🔧 {symbol} özellikler oluşturuluyor...")
+        
+        # Özellikler oluştur
+        try:
+            engineer = FeatureEngineer(config)
+            features_df = engineer.create_all_features(data)
+        except Exception as e:
+            return False, f"{symbol} özellikler oluşturulamadı: {str(e)}"
+        
+        if features_df.empty:
+            return False, f"{symbol} özellikler oluşturulamadı"
+        
+        if progress_callback:
+            progress_callback(f"🤖 {symbol} model eğitiliyor...")
+        
+        # Model eğit
+        predictor = StockDirectionPredictor(config)
+        X, y = predictor.prepare_data(features_df)
+        
+        if len(X) < 100:  # Yeterli veri yok
+            return False, f"{symbol} yeterli veri yok ({len(X)} gün)"
+        
+        # Model eğitimi
+        results = predictor.train_model(X, y)
+        
+        if progress_callback:
+            progress_callback(f"💾 {symbol} model kaydediliyor...")
+        
+        # Modeli kaydet
+        from datetime import datetime
+        symbol_name = symbol.replace('.IS', '')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{symbol_name}_Model_{timestamp}.joblib"
+        
+        model_path = predictor.save_model(filename)
+        
+        if progress_callback:
+            progress_callback(f"✅ {symbol} model eğitimi tamamlandı!")
+        
+        return True, f"{symbol} model eğitildi - Accuracy: {results['test_metrics']['accuracy']:.3f}"
+        
+    except Exception as e:
+        return False, f"{symbol} model eğitimi başarısız: {str(e)}"
+
 def analyze_model_info(model_data, features_df):
     """Model hakkında detaylı bilgi analizi"""
     model_info = {
@@ -468,7 +525,7 @@ def show_future_prediction_tab(selected_symbol, config):
     st.header("🔮 Gelecek Tahmin")
     st.info("🎯 Bu sekme hissenin **bir sonraki hamlesini** tahmin eder ve size net sinyal verir!")
     
-    # Model seçimi
+    # Model seçimi - Otomatik hisse bazlı seçim
     model_files = []
     if os.path.exists('src/models'):
         model_files = [f for f in os.listdir('src/models') if f.endswith('.joblib')]
@@ -476,46 +533,160 @@ def show_future_prediction_tab(selected_symbol, config):
     if not model_files:
         st.warning("⚠️ Eğitilmiş model bulunamadı! Önce model eğitimi yapın.")
     else:
-        # En son modeli otomatik seç
-        model_files.sort(reverse=True)
-        selected_model = st.selectbox("🔮 Tahmin Modeli:", model_files, index=0, key="prediction_model_selection")
+        # Hisse bazlı model bul
+        symbol_name = selected_symbol.replace('.IS', '') if selected_symbol else None
+        symbol_models = [f for f in model_files if symbol_name and symbol_name in f] if symbol_name else []
+        
+        if symbol_models:
+            # En son modeli otomatik seç
+            symbol_models.sort(reverse=True)
+            auto_selected_model = symbol_models[0]
+            
+            st.success(f"✅ {selected_symbol} için uygun model bulundu: **{auto_selected_model}**")
+            
+            # Manuel model seçimi (isteğe bağlı)
+            if st.checkbox("🔄 Manuel model seçimi", value=False, key="manual_model_selection"):
+                selected_model = st.selectbox("🔮 Tahmin Modeli:", model_files, index=0, key="prediction_model_selection")
+            else:
+                selected_model = auto_selected_model
+        else:
+            # Model bulunamadı - Eğitim seçeneği
+            st.warning(f"⚠️ {selected_symbol} için model bulunamadı!")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🤖 Model Eğit (Önerilen)", type="primary", key="train_model_button"):
+                    with st.spinner("🔮 Model eğitiliyor, lütfen bekleyin..."):
+                        # Progress bar
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        # Progress değişkeni
+                        call_count = [0]
+                        
+                        def update_progress(message):
+                            call_count[0] += 1
+                            status_text.text(message)
+                            # 5 aşamalı progress (0, 25, 50, 75, 100)
+                            progress = min(100, call_count[0] * 20)
+                            progress_bar.progress(progress)
+                        
+                        # Model eğit
+                        success, message = train_model_for_symbol(selected_symbol, config, update_progress)
+                        
+                        if success:
+                            st.success(f"✅ {message}")
+                            st.info("🔄 Sayfayı yenileyin ve yeniden deneyin.")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {message}")
+            
+            with col2:
+                st.info("💡 Model yoksa, genel bir model kullanılabilir (daha az doğru olabilir)")
+            
+            st.markdown("---")
+            st.info(f"ℹ️ Alternatif: Genel bir model kullanmak isterseniz aşağıdaki butonu kullanın")
+            
+            # Genel model seçeneği
+            model_files.sort(reverse=True)
+            if st.checkbox("🔄 Genel model kullan", value=False, key="use_general_model"):
+                selected_model = st.selectbox("🔮 Genel Model:", model_files, index=0, key="general_model_selection")
+                st.info(f"ℹ️ Genel model kullanılacak: **{selected_model}**")
+            else:
+                selected_model = None  # Model seçilmedi
         
         # Tahmin butonu
-        if st.button("🔮 Gelecek Hamleyi Tahmin Et", type="primary"):
-            with st.spinner("🔮 Gelecek hamle tahmin ediliyor..."):
-                try:
-                    # Modeli yükle
-                    predictor = StockDirectionPredictor(config)
-                    model_path = f'src/models/{selected_model}'
-                    
-                    if not predictor.load_model(model_path):
-                        st.error("❌ Model yüklenemedi!")
-                    else:
-                        # Güncel veri yükle
-                        data = load_stock_data(selected_symbol, "1y")
-                        features_df = create_features(data)
+        if st.button("🔮 Gelecek Hamleyi Tahmin Et", type="primary", disabled=(selected_model is None)):
+            if selected_model is None:
+                st.error("❌ Lütfen önce model eğitin veya genel model seçin!")
+            else:
+                with st.spinner("🔮 Gelecek hamle tahmin ediliyor..."):
+                    try:
+                        # Modeli yükle
+                        predictor = StockDirectionPredictor(config)
+                        model_path = f'src/models/{selected_model}'
                         
-                        if features_df.empty:
-                            st.error("❌ Özellikler oluşturulamadı!")
+                        # Model dosyasının var olup olmadığını kontrol et
+                        if not os.path.exists(model_path):
+                            st.error(f"❌ Model dosyası bulunamadı: {model_path}")
+                        elif not predictor.load_model(model_path):
+                            st.error(f"❌ Model yüklenemedi: {model_path}")
+                            st.warning("⚠️ **Model yüklenemiyor - Numpy uyumsuzluğu olabilir.**")
+                            
+                            # Otomatik model eğitimi seçeneği
+                            st.info("💡 **Çözüm:** Aynı anda yeni model eğitelim mi?")
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                if st.button("🤖 Hemen Model Eğit", type="primary"):
+                                    # Önce eski modelleri temizle
+                                    symbol_name = selected_symbol.replace('.IS', '')
+                                    old_models = [f for f in os.listdir('src/models') if f.endswith('.joblib') and symbol_name in f]
+                                    for old_model in old_models:
+                                        try:
+                                            os.remove(f'src/models/{old_model}')
+                                        except:
+                                            pass
+                                    
+                                    # Progress container
+                                    progress_container = st.container()
+                                    progress_bar = progress_container.progress(0)
+                                    status_text = progress_container.empty()
+                                    
+                                    # Model eğit (Hisse Avcısı'ndaki gibi)
+                                    def update_status(message):
+                                        status_text.text(message)
+                                    
+                                    success, message = train_model_for_symbol(selected_symbol, config, update_status)
+                                    
+                                    if success:
+                                        st.success(f"✅ {message}")
+                                        progress_bar.progress(1.0)
+                                        st.balloons()
+                                        st.info("🔄 Sayfa yenileniyor...")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {message}")
+                            
+                            with col2:
+                                if st.button("🗑️ Eski Modelleri Sil", type="secondary"):
+                                    try:
+                                        import glob
+                                        old_models = glob.glob('src/models/*.joblib')
+                                        for model in old_models:
+                                            os.remove(model)
+                                        st.success("✅ Eski modeller temizlendi! Yukarıdaki buton ile yeni model eğitebilirsiniz.")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"❌ Silme hatası: {str(e)}")
                         else:
-                            # Son günün tahminini yap
-                            X, y = predictor.prepare_data(features_df)
-                            predictions, probabilities = predictor.predict(X)
+                            # Güncel veri yükle
+                            data = load_stock_data(selected_symbol, "1y")
+                            features_df = create_features(data)
                             
-                            # Son tahmin
-                            last_prediction = predictions[-1]
-                            last_confidence = np.max(probabilities[-1])
-                            last_prob_up = probabilities[-1][1]
-                            last_prob_down = probabilities[-1][0]
-                            
-                            # Son fiyat
-                            last_price = data['close'].iloc[-1]
-                            
-                            # Volatilite hesapla
-                            volatility = data['close'].pct_change().std() * np.sqrt(252)
-                            
-                            # Hedef fiyat tahmini - Model verileri ile
-                            price_predictor = PriceTargetPredictor(config)
+                            if features_df.empty:
+                                st.error("❌ Özellikler oluşturulamadı!")
+                            else:
+                                # Son günün tahminini yap
+                                X, y = predictor.prepare_data(features_df)
+                                predictions, probabilities = predictor.predict(X)
+                                
+                                # Son tahmin
+                                last_prediction = predictions[-1]
+                                last_confidence = np.max(probabilities[-1])
+                                last_prob_up = probabilities[-1][1]
+                                last_prob_down = probabilities[-1][0]
+                                
+                                # Son fiyat
+                                last_price = data['close'].iloc[-1]
+                                
+                                # Volatilite hesapla
+                                volatility = data['close'].pct_change().std() * np.sqrt(252)
+                                
+                                # Hedef fiyat tahmini - Model verileri ile
+                                price_predictor = PriceTargetPredictor(config)
                             
                             # Model metriklerini al (varsa)
                             model_metrics = {}
@@ -647,105 +818,386 @@ def show_future_prediction_tab(selected_symbol, config):
                             with col4:
                                 st.metric("📈 Risk/Getiri", f"{price_targets['risk_reward_ratio']:.2f}")
                             
-                            # Destek/Direnç Seviyeleri - Önemli!
+                            # Destek/Direnç Seviyeleri - Detaylı Analiz
                             st.subheader("🎯 Destek/Direnç Seviyeleri")
                             
                             chart_analysis = price_targets['time_targets']['conservative']['chart_analysis']
                             
+                            # Ana seviyeler
                             col1, col2, col3 = st.columns(3)
                             
                             with col1:
+                                support_distance = ((chart_analysis['support_level'] - last_price) / last_price * 100)
+                                support_color = "#28a745" if support_distance < -5 else "#ffc107" if support_distance < -2 else "#dc3545"
                                 st.markdown(f"""
-                                <div style="background-color: #e8f5e8; padding: 20px; border-radius: 10px; text-align: center; border-left: 5px solid #28a745;">
-                                    <h3 style="color: #155724; margin: 0;">🛡️ Destek</h3>
+                                <div style="background-color: #e8f5e8; padding: 20px; border-radius: 10px; text-align: center; border-left: 5px solid {support_color};">
+                                    <h3 style="color: #155724; margin: 0;">🛡️ Destek Seviyesi</h3>
                                     <h2 style="color: #155724; margin: 10px 0;">{chart_analysis['support_level']:.2f} TL</h2>
-                                    <p style="color: #666; margin: 0;">Mevcut fiyattan %{((chart_analysis['support_level'] - last_price) / last_price * 100):+.1f}</p>
+                                    <p style="color: #666; margin: 0;">Mevcut fiyattan %{support_distance:+.1f}</p>
+                                    <p style="color: #666; margin: 5px 0; font-size: 0.9em;">
+                                        {'⚠️ Kritik seviye!' if abs(support_distance) < 3 else '✅ Güvenli mesafe'}
+                                    </p>
                                 </div>
                                 """, unsafe_allow_html=True)
                             
                             with col2:
                                 st.markdown(f"""
                                 <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; text-align: center; border-left: 5px solid #6c757d;">
-                                    <h3 style="color: #495057; margin: 0;">💰 Mevcut</h3>
+                                    <h3 style="color: #495057; margin: 0;">💰 Mevcut Fiyat</h3>
                                     <h2 style="color: #495057; margin: 10px 0;">{last_price:.2f} TL</h2>
-                                    <p style="color: #666; margin: 0;">Son fiyat</p>
+                                    <p style="color: #666; margin: 0;">Son kapanış fiyatı</p>
+                                    <p style="color: #666; margin: 5px 0; font-size: 0.9em;">
+                                        Volatilite: %{volatility*100:.1f}
+                                    </p>
                                 </div>
                                 """, unsafe_allow_html=True)
                             
                             with col3:
+                                resistance_distance = ((chart_analysis['resistance_level'] - last_price) / last_price * 100)
+                                resistance_color = "#28a745" if resistance_distance > 5 else "#ffc107" if resistance_distance > 2 else "#dc3545"
                                 st.markdown(f"""
-                                <div style="background-color: #f8d7da; padding: 20px; border-radius: 10px; text-align: center; border-left: 5px solid #dc3545;">
-                                    <h3 style="color: #721c24; margin: 0;">🚀 Direnç</h3>
+                                <div style="background-color: #f8d7da; padding: 20px; border-radius: 10px; text-align: center; border-left: 5px solid {resistance_color};">
+                                    <h3 style="color: #721c24; margin: 0;">🚀 Direnç Seviyesi</h3>
                                     <h2 style="color: #721c24; margin: 10px 0;">{chart_analysis['resistance_level']:.2f} TL</h2>
-                                    <p style="color: #666; margin: 0;">Mevcut fiyattan %{((chart_analysis['resistance_level'] - last_price) / last_price * 100):+.1f}</p>
+                                    <p style="color: #666; margin: 0;">Mevcut fiyattan %{resistance_distance:+.1f}</p>
+                                    <p style="color: #666; margin: 5px 0; font-size: 0.9em;">
+                                        {'⚠️ Kritik seviye!' if abs(resistance_distance) < 3 else '✅ Güvenli mesafe'}
+                                    </p>
                                 </div>
                                 """, unsafe_allow_html=True)
                             
-                            # Basit Hedef Fiyatlar
-                            st.subheader("🎯 Hedef Fiyatlar")
+                            # Ek destek/direnç seviyeleri
+                            st.markdown("---")
+                            st.subheader("📊 Ek Destek/Direnç Seviyeleri")
+                            
+                            # Geçmiş verilerden ek seviyeler hesapla
+                            if len(data) >= 50:
+                                # 50 günlük destek/direnç
+                                support_50d = data['low'].tail(50).min()
+                                resistance_50d = data['high'].tail(50).max()
+                                
+                                # 20 günlük destek/direnç
+                                support_20d = data['low'].tail(20).min()
+                                resistance_20d = data['high'].tail(20).max()
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.metric(
+                                        "🛡️ 20 Günlük Destek",
+                                        f"{support_20d:.2f} TL",
+                                        f"{((support_20d - last_price) / last_price * 100):+.1f}%"
+                                    )
+                                
+                                with col2:
+                                    st.metric(
+                                        "🚀 20 Günlük Direnç", 
+                                        f"{resistance_20d:.2f} TL",
+                                        f"{((resistance_20d - last_price) / last_price * 100):+.1f}%"
+                                    )
+                                
+                                with col3:
+                                    st.metric(
+                                        "🛡️ 50 Günlük Destek",
+                                        f"{support_50d:.2f} TL", 
+                                        f"{((support_50d - last_price) / last_price * 100):+.1f}%"
+                                    )
+                                
+                                with col4:
+                                    st.metric(
+                                        "🚀 50 Günlük Direnç",
+                                        f"{resistance_50d:.2f} TL",
+                                        f"{((resistance_50d - last_price) / last_price * 100):+.1f}%"
+                                    )
+                            
+                            # Detaylı Hedef Fiyatlar ve Süreler
+                            st.markdown("---")
+                            st.subheader("🎯 Hedef Fiyatlar ve Tahmini Süreler")
+                            
+                            # Konservatif hedef
+                            conservative_info = price_targets['time_targets']['conservative']
+                            conservative_target = price_targets['targets']['conservative']
+                            conservative_change = ((conservative_target - last_price) / last_price * 100)
                             
                             col1, col2, col3, col4 = st.columns(4)
                             
                             with col1:
-                                st.metric(
-                                    "Konservatif Hedef", 
-                                    f"{price_targets['targets']['conservative']:.2f} TL",
-                                    f"{((price_targets['targets']['conservative'] - last_price) / last_price * 100):+.1f}%"
-                                )
+                                st.markdown(f"""
+                                <div style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); padding: 20px; border-radius: 15px; text-align: center; border: 2px solid #28a745;">
+                                    <h3 style="color: #155724; margin: 0;">🛡️ Konservatif</h3>
+                                    <h2 style="color: #155724; margin: 10px 0;">{conservative_target:.2f} TL</h2>
+                                    <p style="color: #155724; margin: 5px 0; font-weight: bold;">%{conservative_change:+.1f}</p>
+                                    <hr style="margin: 10px 0; border-color: #28a745;">
+                                    <p style="color: #155724; margin: 5px 0; font-size: 0.9em;">
+                                        <strong>⏰ Süre:</strong> {conservative_info['estimated_days']} gün
+                                    </p>
+                                    <p style="color: #155724; margin: 5px 0; font-size: 0.9em;">
+                                        <strong>📅 Tarih:</strong> {conservative_info['estimated_date']}
+                                    </p>
+                                    <p style="color: #666; margin: 5px 0; font-size: 0.8em;">
+                                        ({conservative_info['min_days']}-{conservative_info['max_days']} gün arası)
+                                    </p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            # Orta hedef
+                            moderate_info = price_targets['time_targets']['moderate']
+                            moderate_target = price_targets['targets']['moderate']
+                            moderate_change = ((moderate_target - last_price) / last_price * 100)
                             
                             with col2:
-                                st.metric(
-                                    "Orta Hedef", 
-                                    f"{price_targets['targets']['moderate']:.2f} TL",
-                                    f"{((price_targets['targets']['moderate'] - last_price) / last_price * 100):+.1f}%"
-                                )
+                                st.markdown(f"""
+                                <div style="background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); padding: 20px; border-radius: 15px; text-align: center; border: 2px solid #ffc107;">
+                                    <h3 style="color: #856404; margin: 0;">⚖️ Orta</h3>
+                                    <h2 style="color: #856404; margin: 10px 0;">{moderate_target:.2f} TL</h2>
+                                    <p style="color: #856404; margin: 5px 0; font-weight: bold;">%{moderate_change:+.1f}</p>
+                                    <hr style="margin: 10px 0; border-color: #ffc107;">
+                                    <p style="color: #856404; margin: 5px 0; font-size: 0.9em;">
+                                        <strong>⏰ Süre:</strong> {moderate_info['estimated_days']} gün
+                                    </p>
+                                    <p style="color: #856404; margin: 5px 0; font-size: 0.9em;">
+                                        <strong>📅 Tarih:</strong> {moderate_info['estimated_date']}
+                                    </p>
+                                    <p style="color: #666; margin: 5px 0; font-size: 0.8em;">
+                                        ({moderate_info['min_days']}-{moderate_info['max_days']} gün arası)
+                                    </p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            # Agresif hedef
+                            aggressive_info = price_targets['time_targets']['aggressive']
+                            aggressive_target = price_targets['targets']['aggressive']
+                            aggressive_change = ((aggressive_target - last_price) / last_price * 100)
                             
                             with col3:
-                                st.metric(
-                                    "Agresif Hedef", 
-                                    f"{price_targets['targets']['aggressive']:.2f} TL",
-                                    f"{((price_targets['targets']['aggressive'] - last_price) / last_price * 100):+.1f}%"
-                                )
+                                st.markdown(f"""
+                                <div style="background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%); padding: 20px; border-radius: 15px; text-align: center; border: 2px solid #dc3545;">
+                                    <h3 style="color: #721c24; margin: 0;">🚀 Agresif</h3>
+                                    <h2 style="color: #721c24; margin: 10px 0;">{aggressive_target:.2f} TL</h2>
+                                    <p style="color: #721c24; margin: 5px 0; font-weight: bold;">%{aggressive_change:+.1f}</p>
+                                    <hr style="margin: 10px 0; border-color: #dc3545;">
+                                    <p style="color: #721c24; margin: 5px 0; font-size: 0.9em;">
+                                        <strong>⏰ Süre:</strong> {aggressive_info['estimated_days']} gün
+                                    </p>
+                                    <p style="color: #721c24; margin: 5px 0; font-size: 0.9em;">
+                                        <strong>📅 Tarih:</strong> {aggressive_info['estimated_date']}
+                                    </p>
+                                    <p style="color: #666; margin: 5px 0; font-size: 0.8em;">
+                                        ({aggressive_info['min_days']}-{aggressive_info['max_days']} gün arası)
+                                    </p>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            # Stop Loss
+                            stop_loss = price_targets['stop_loss']
+                            stop_loss_change = ((stop_loss - last_price) / last_price * 100)
                             
                             with col4:
-                                st.metric(
-                                    "Stop Loss", 
-                                    f"{price_targets['stop_loss']:.2f} TL",
-                                    f"{((price_targets['stop_loss'] - last_price) / last_price * 100):+.1f}%"
-                                )
+                                st.markdown(f"""
+                                <div style="background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%); padding: 20px; border-radius: 15px; text-align: center; border: 2px solid #17a2b8;">
+                                    <h3 style="color: #0c5460; margin: 0;">🛡️ Stop Loss</h3>
+                                    <h2 style="color: #0c5460; margin: 10px 0;">{stop_loss:.2f} TL</h2>
+                                    <p style="color: #0c5460; margin: 5px 0; font-weight: bold;">%{stop_loss_change:+.1f}</p>
+                                    <hr style="margin: 10px 0; border-color: #17a2b8;">
+                                    <p style="color: #0c5460; margin: 5px 0; font-size: 0.9em;">
+                                        <strong>⚠️ Risk:</strong> {'Yüksek' if abs(stop_loss_change) > 5 else 'Orta' if abs(stop_loss_change) > 3 else 'Düşük'}
+                                    </p>
+                                    <p style="color: #0c5460; margin: 5px 0; font-size: 0.9em;">
+                                        <strong>📊 R/G:</strong> {price_targets['risk_reward_ratio']:.2f}
+                                    </p>
+                                    <p style="color: #666; margin: 5px 0; font-size: 0.8em;">
+                                        {'Hemen satış' if last_prediction == 0 else 'Koruma seviyesi'}
+                                    </p>
+                                </div>
+                                """, unsafe_allow_html=True)
                             
-                            # Basit Tahmini Süreler
-                            st.subheader("📅 Tahmini Süreler")
+                            # Ortalama Süre Analizi
+                            st.markdown("---")
+                            st.subheader("📊 Ortalama Süre Analizi")
                             
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                conservative_info = price_targets['time_targets']['conservative']
-                                st.info(f"""
-                                **🛡️ Konservatif**
-                                {conservative_info['estimated_days']} gün
-                                ({conservative_info['min_days']}-{conservative_info['max_days']} gün arası)
-                                """)
-                            
-                            with col2:
-                                moderate_info = price_targets['time_targets']['moderate']
-                                st.info(f"""
-                                **⚖️ Orta**
-                                {moderate_info['estimated_days']} gün
-                                ({moderate_info['min_days']}-{moderate_info['max_days']} gün arası)
-                                """)
-                            
-                            with col3:
-                                aggressive_info = price_targets['time_targets']['aggressive']
-                                st.info(f"""
-                                **🚀 Agresif**
-                                {aggressive_info['estimated_days']} gün
-                                ({aggressive_info['min_days']}-{aggressive_info['max_days']} gün arası)
-                                """)
+                            # Geçmiş hareket analizi bilgilerini göster
+                            if 'historical_analysis' in conservative_info and not conservative_info['historical_analysis'].get('insufficient_data', False):
+                                historical_analysis = conservative_info['historical_analysis']
+                                
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    st.markdown(f"""
+                                    <div style="background-color: #e3f2fd; padding: 15px; border-radius: 10px; border-left: 5px solid #2196f3;">
+                                        <h4 style="color: #0d47a1; margin: 0 0 10px 0;">📈 Trend Analizi</h4>
+                                        <p style="color: #1565c0; margin: 5px 0;"><strong>Güç:</strong> {historical_analysis.get('trend_strength', 0):.2f}</p>
+                                        <p style="color: #1565c0; margin: 5px 0;"><strong>Yön:</strong> {'Yükseliş' if historical_analysis.get('trend_direction', 0) > 0 else 'Düşüş'}</p>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                with col2:
+                                    st.markdown(f"""
+                                    <div style="background-color: #e8f5e8; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50;">
+                                        <h4 style="color: #1b5e20; margin: 0 0 10px 0;">📊 Volatilite Analizi</h4>
+                                        <p style="color: #2e7d32; margin: 5px 0;"><strong>Son 20 gün:</strong> %{historical_analysis.get('recent_volatility', 0)*100:.1f}</p>
+                                        <p style="color: #2e7d32; margin: 5px 0;"><strong>Uzun vadeli:</strong> %{historical_analysis.get('long_term_volatility', 0)*100:.1f}</p>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                with col3:
+                                    volatility_ratio = historical_analysis.get('volatility_ratio', 1.0)
+                                    volatility_status = "Yüksek" if volatility_ratio > 1.2 else "Normal" if volatility_ratio > 0.8 else "Düşük"
+                                    volatility_color = "#f44336" if volatility_ratio > 1.2 else "#4caf50" if volatility_ratio > 0.8 else "#ff9800"
+                                    
+                                    st.markdown(f"""
+                                    <div style="background-color: #fff3e0; padding: 15px; border-radius: 10px; border-left: 5px solid {volatility_color};">
+                                        <h4 style="color: #e65100; margin: 0 0 10px 0;">⚡ Volatilite Durumu</h4>
+                                        <p style="color: #f57c00; margin: 5px 0;"><strong>Oran:</strong> {volatility_ratio:.2f}</p>
+                                        <p style="color: #f57c00; margin: 5px 0;"><strong>Durum:</strong> {volatility_status}</p>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                # Geçmiş hareket analizi detayları
+                                movement_analysis = historical_analysis.get('movement_analysis', {})
+                                if movement_analysis:
+                                    st.markdown("---")
+                                    st.subheader("📈 Geçmiş Hareket Analizi")
+                                    st.info("💡 Geçmişte benzer hareketlerin kaç günde tamamlandığını görün")
+                                    
+                                    for i, (movement_key, movement_data) in enumerate(movement_analysis.items()):
+                                        change_pct = float(movement_key) * 100
+                                        avg_days = movement_data['avg_days']
+                                        sample_count = movement_data['sample_count']
+                                        min_days = movement_data.get('min_days', avg_days)
+                                        max_days = movement_data.get('max_days', avg_days)
+                                        std_days = movement_data.get('std_days', 0)
+                                        
+                                        # Renk kodlaması: Hareket büyüklüğüne göre
+                                        if change_pct >= 10:
+                                            border_color = "#f44336"  # Kırmızı
+                                            color = "#721c24"
+                                        elif change_pct >= 5:
+                                            border_color = "#ff9800"  # Turuncu
+                                            color = "#e65100"
+                                        elif change_pct >= 2:
+                                            border_color = "#ffc107"  # Sarı
+                                            color = "#856404"
+                                        else:
+                                            border_color = "#4caf50"  # Yeşil
+                                            color = "#1b5e20"
+                                        
+                                        with st.expander(f"📊 %{change_pct:+.1f} Hareket - {sample_count} örnek bulundu", expanded=False):
+                                            # İstatistikler
+                                            col1, col2, col3, col4 = st.columns(4)
+                                            
+                                            with col1:
+                                                st.metric(
+                                                    "⏱️ Ortalama Süre",
+                                                    f"{avg_days:.1f} gün",
+                                                    help="Bu büyüklükteki hareketin ortalama süresi"
+                                                )
+                                            
+                                            with col2:
+                                                st.metric(
+                                                    "📊 Örnek Sayısı",
+                                                    f"{sample_count}",
+                                                    help=f"Geçmişte {sample_count} kez benzer hareket görülmüş"
+                                                )
+                                            
+                                            with col3:
+                                                st.metric(
+                                                    "⚡ Min/Max",
+                                                    f"{min_days:.0f}-{max_days:.0f} gün",
+                                                    help="En kısa ve en uzun süreler"
+                                                )
+                                            
+                                            with col4:
+                                                variability = "Yüksek" if std_days > avg_days * 0.5 else "Orta" if std_days > avg_days * 0.25 else "Düşük"
+                                                st.metric(
+                                                    "📈 Tutarlılık",
+                                                    variability,
+                                                    help="Hareket süresinin tutarlılığı"
+                                                )
+                                            
+                                            st.markdown("---")
+                                            
+                                            # Detaylı analiz
+                                            col1, col2 = st.columns(2)
+                                            
+                                            with col1:
+                                                st.markdown("""
+                                                **📊 Süre Dağılımı:**
+                                                """)
+                                                
+                                                if std_days > 0:
+                                                    # Standart sapma açıklaması
+                                                    st.markdown(f"""
+                                                    <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px;">
+                                                        <p style="margin: 0;"><strong>📊 Ortalama:</strong> {avg_days:.1f} gün</p>
+                                                        <p style="margin: 0;"><strong>📏 Standart Sapma:</strong> {std_days:.1f} gün</p>
+                                                        <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                                            <strong>🎯 En Olası Aralık:</strong> {max(1, int(avg_days - std_days)):.0f} - {int(avg_days + std_days):.0f} gün
+                                                        </p>
+                                                    </div>
+                                                    """, unsafe_allow_html=True)
+                                                else:
+                                                    st.markdown(f"""
+                                                    <div style="background-color: #e8f5e9; padding: 15px; border-radius: 8px;">
+                                                        <p style="margin: 0;"><strong>✅ Sabit Süre:</strong> {avg_days:.1f} gün</p>
+                                                        <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                                            Tüm hareketler neredeyse aynı sürede tamamlanmış
+                                                        </p>
+                                                    </div>
+                                                    """, unsafe_allow_html=True)
+                                            
+                                            with col2:
+                                                st.markdown("""
+                                                **🎯 Tahmin Güvenilirliği:**
+                                                """)
+                                                
+                                                # Güvenilirlik hesapla
+                                                if sample_count >= 20:
+                                                    reliability = "Çok Yüksek"
+                                                    reliability_color = "#4caf50"
+                                                    emoji = "🟢"
+                                                elif sample_count >= 10:
+                                                    reliability = "Yüksek"
+                                                    reliability_color = "#8bc34a"
+                                                    emoji = "🟡"
+                                                elif sample_count >= 5:
+                                                    reliability = "Orta"
+                                                    reliability_color = "#ff9800"
+                                                    emoji = "🟠"
+                                                else:
+                                                    reliability = "Düşük"
+                                                    reliability_color = "#f44336"
+                                                    emoji = "🔴"
+                                                
+                                                # STD bazlı ek değerlendirme
+                                                if std_days / avg_days > 0.75:
+                                                    reliability = reliability + " (Değişken)"
+                                                
+                                                st.markdown(f"""
+                                                <div style="background-color: {reliability_color}20; padding: 15px; border-radius: 8px; border-left: 4px solid {reliability_color};">
+                                                    <p style="margin: 0;"><strong>{emoji} Güvenilirlik:</strong> {reliability}</p>
+                                                    <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                                        {sample_count} örnek {'yeterli' if sample_count >= 10 else 'sınırlı'} veri sağlıyor
+                                                    </p>
+                                                    {'<p style="margin: 5px 0; font-size: 0.9em; color: #f44336;"><strong>⚠️:</strong> Süre değişkenliği yüksek</p>' if std_days / avg_days > 0.75 else ''}
+                                                </div>
+                                                """, unsafe_allow_html=True)
+                                            
+                                            # Örnekler
+                                            st.markdown("---")
+                                            st.markdown(f"""
+                                            **📋 Analiz Detayı:**
+                                            - <strong>🎯 Hedef:</strong> %{change_pct:.1f} fiyat değişimi
+                                            - <strong>📅 Görüldü:</strong> Son {len(data)} gün içinde {sample_count} kez
+                                            - <strong>🔄 Sıklık:</strong> Her {len(data)/max(sample_count, 1):.1f} günde bir ortalama
+                                            - <strong>⏱️ Süre:</strong> {min_days:.0f} - {max_days:.0f} gün arası değişiyor
+                                            {f'- <strong>📏 Dağılım:</strong> {std_days:.1f} gün standart sapma' if std_days > 0 else ''}
+                                            """, unsafe_allow_html=True)
+                            else:
+                                st.info("📊 Geçmiş hareket analizi için yeterli veri bulunamadı.")
                             
                             # Detaylı Analiz (Daraltılabilir)
-                            with st.expander("🔍 Detaylı Analiz", expanded=False):
-                                st.subheader("📊 Grafik Analizi")
+                            with st.expander("🔍 Detaylı Grafik ve Model Analizi", expanded=False):
+                                st.subheader("📊 Grafik Analizi Detayları")
                                 
                                 chart_analysis = price_targets['time_targets']['conservative']['chart_analysis']
                                 
@@ -754,18 +1206,24 @@ def show_future_prediction_tab(selected_symbol, config):
                                 with col1:
                                     trend_color = "green" if chart_analysis['trend_strength'] == 'Strong' else "orange" if chart_analysis['trend_strength'] == 'Medium' else "red"
                                     st.markdown(f"""
-                                    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center;">
-                                        <h5 style="color: {trend_color}; margin: 0;">📈 Trend Gücü</h5>
-                                        <p style="margin: 5px 0;"><strong>{chart_analysis['trend_strength']}</strong></p>
+                                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid {trend_color};">
+                                        <h5 style="color: {trend_color}; margin: 0 0 10px 0;">📈 Trend Gücü</h5>
+                                        <p style="margin: 5px 0; font-size: 1.2em;"><strong>{chart_analysis['trend_strength']}</strong></p>
+                                        <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                            Değer: {chart_analysis.get('trend_strength_value', 0):.3f}
+                                        </p>
                                     </div>
                                     """, unsafe_allow_html=True)
                                 
                                 with col2:
                                     volume_color = "green" if chart_analysis['volume_trend'] == 'Increasing' else "orange" if chart_analysis['volume_trend'] == 'Stable' else "red"
                                     st.markdown(f"""
-                                    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center;">
-                                        <h5 style="color: {volume_color}; margin: 0;">📊 Hacim Trendi</h5>
-                                        <p style="margin: 5px 0;"><strong>{chart_analysis['volume_trend']}</strong></p>
+                                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid {volume_color};">
+                                        <h5 style="color: {volume_color}; margin: 0 0 10px 0;">📊 Hacim Trendi</h5>
+                                        <p style="margin: 5px 0; font-size: 1.2em;"><strong>{chart_analysis['volume_trend']}</strong></p>
+                                        <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                            {'Artan hacim = Güçlü sinyal' if chart_analysis['volume_trend'] == 'Increasing' else 'Stabil hacim = Normal' if chart_analysis['volume_trend'] == 'Stable' else 'Azalan hacim = Zayıf sinyal'}
+                                        </p>
                                     </div>
                                     """, unsafe_allow_html=True)
                                 
@@ -773,19 +1231,74 @@ def show_future_prediction_tab(selected_symbol, config):
                                     sr_status = "⚠️ Yakın" if chart_analysis['near_support_resistance'] else "✅ Uzak"
                                     sr_color = "orange" if chart_analysis['near_support_resistance'] else "green"
                                     st.markdown(f"""
-                                    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center;">
-                                        <h5 style="color: {sr_color}; margin: 0;">🎯 Destek/Direnç</h5>
-                                        <p style="margin: 5px 0;"><strong>{sr_status}</strong></p>
+                                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid {sr_color};">
+                                        <h5 style="color: {sr_color}; margin: 0 0 10px 0;">🎯 Destek/Direnç</h5>
+                                        <p style="margin: 5px 0; font-size: 1.2em;"><strong>{sr_status}</strong></p>
+                                        <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                            {'Kritik seviyeler yakın' if chart_analysis['near_support_resistance'] else 'Güvenli mesafe'}
+                                        </p>
                                     </div>
                                     """, unsafe_allow_html=True)
                                 
                                 with col4:
+                                    pattern_color = "green" if 'Uptrend' in chart_analysis['pattern'] else "red" if 'Downtrend' in chart_analysis['pattern'] else "orange"
                                     st.markdown(f"""
-                                    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; text-align: center;">
-                                        <h5 style="color: #333; margin: 0;">🔍 Pattern</h5>
-                                        <p style="margin: 5px 0;"><strong>{chart_analysis['pattern']}</strong></p>
+                                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid {pattern_color};">
+                                        <h5 style="color: {pattern_color}; margin: 0 0 10px 0;">🔍 Pattern</h5>
+                                        <p style="margin: 5px 0; font-size: 1.1em;"><strong>{chart_analysis['pattern']}</strong></p>
+                                        <p style="margin: 5px 0; font-size: 0.8em; color: #666;">
+                                            Grafik kalıbı
+                                        </p>
                                     </div>
                                     """, unsafe_allow_html=True)
+                                
+                                # Model Performans Analizi
+                                if 'model_analysis' in conservative_info and conservative_info['model_analysis']:
+                                    st.markdown("---")
+                                    st.subheader("🤖 Model Performans Analizi")
+                                    
+                                    model_analysis = conservative_info['model_analysis']
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        accuracy = model_analysis.get('accuracy', 0)
+                                        accuracy_color = "green" if accuracy > 0.7 else "orange" if accuracy > 0.6 else "red"
+                                        st.markdown(f"""
+                                        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid {accuracy_color};">
+                                            <h5 style="color: {accuracy_color}; margin: 0 0 10px 0;">🎯 Model Doğruluğu</h5>
+                                            <p style="margin: 5px 0; font-size: 1.5em;"><strong>%{accuracy*100:.1f}</strong></p>
+                                            <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                                {'Mükemmel' if accuracy > 0.8 else 'İyi' if accuracy > 0.7 else 'Orta' if accuracy > 0.6 else 'Zayıf'}
+                                            </p>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    with col2:
+                                        reliability = model_analysis.get('reliability_score', 0)
+                                        reliability_color = "green" if reliability > 0.7 else "orange" if reliability > 0.6 else "red"
+                                        st.markdown(f"""
+                                        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid {reliability_color};">
+                                            <h5 style="color: {reliability_color}; margin: 0 0 10px 0;">💪 Güvenilirlik</h5>
+                                            <p style="margin: 5px 0; font-size: 1.5em;"><strong>%{reliability*100:.1f}</strong></p>
+                                            <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                                {'Çok güvenilir' if reliability > 0.8 else 'Güvenilir' if reliability > 0.7 else 'Orta' if reliability > 0.6 else 'Zayıf'}
+                                            </p>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    with col3:
+                                        performance = model_analysis.get('performance_category', 'Unknown')
+                                        perf_color = "green" if performance == 'Excellent' else "orange" if performance == 'Good' else "red"
+                                        st.markdown(f"""
+                                        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid {perf_color};">
+                                            <h5 style="color: {perf_color}; margin: 0 0 10px 0;">📊 Performans</h5>
+                                            <p style="margin: 5px 0; font-size: 1.2em;"><strong>{performance}</strong></p>
+                                            <p style="margin: 5px 0; font-size: 0.9em; color: #666;">
+                                                {'Mükemmel' if performance == 'Excellent' else 'İyi' if performance == 'Good' else 'Orta' if performance == 'Fair' else 'Zayıf'}
+                                            </p>
+                                        </div>
+                                        """, unsafe_allow_html=True)
                             
                             # Tahmin Sebepleri Analizi
                             st.markdown("---")
@@ -1003,5 +1516,27 @@ def show_future_prediction_tab(selected_symbol, config):
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
-                except Exception as e:
-                    st.error(f"❌ Tahmin hatası: {str(e)}")
+                                # Export butonları - Son bölüm
+                                try:
+                                    # Export için gerekli veriler
+                                    export_data = {
+                                        'prediction': last_prediction,
+                                        'confidence': last_confidence,
+                                        'current_price': last_price,
+                                        'targets': price_targets['targets'],
+                                        'time_targets': price_targets['time_targets'],
+                                        'volatility': volatility,
+                                        'risk_reward_ratio': price_targets['risk_reward_ratio'],
+                                        'stop_loss': price_targets['stop_loss'],
+                                        'prediction_factors': prediction_factors,
+                                        'model_info': model_info
+                                    }
+                                    
+                                    # Export butonlarını göster
+                                    create_export_buttons(selected_symbol, export_data)
+                                    
+                                except Exception as export_error:
+                                    st.warning(f"⚠️ Export özelliği şu anda kullanılamıyor: {str(export_error)}")
+                                
+                    except Exception as e:
+                        st.error(f"❌ Tahmin hatası: {str(e)}")

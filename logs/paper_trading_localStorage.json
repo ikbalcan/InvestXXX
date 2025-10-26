@@ -1,0 +1,26 @@
+{
+  "initial_capital": 100000,
+  "current_capital": 90000,
+  "positions": {
+    "THYAO.IS": {
+      "quantity": 100,
+      "entry_price": 100.0,
+      "entry_date": "2025-10-25T16:32:01.705938",
+      "confidence": 0.8
+    }
+  },
+  "trade_history": [
+    {
+      "date": "2025-10-25T16:32:01.705942",
+      "symbol": "THYAO.IS",
+      "action": "BUY",
+      "price": 100.0,
+      "quantity": 100,
+      "position_size": 10000,
+      "confidence": 0.8,
+      "capital_after": 90000,
+      "manual_entry": true
+    }
+  ],
+  "last_updated": "2025-10-25T16:32:01.705943"
+}

@@ -356,96 +356,17 @@ Güven Eşiği: {recommendations['confidence_threshold']:.2f}
                     st.metric("Max Depth", dynamic_max_depth)
                     st.metric("Günlük İşlem", dynamic_max_trades)
                 
-                # Otomatik backtest çalıştır
-                st.subheader("📈 Otomatik Backtest")
-                st.info("Model eğitimi tamamlandı! Dinamik parametrelerle backtest çalıştırılıyor...")
+                # Model eğitimi tamamlandı mesajı
+                st.subheader("✅ Model Eğitimi Tamamlandı!")
+                st.success("🎯 Model başarıyla eğitildi ve kaydedildi!")
                 
-                with st.spinner("Backtest çalıştırılıyor..."):
-                    try:
-                        backtester = Backtester(full_config)
-                        backtest_results = backtester.run_backtest(features_df, 
-                                                                 results['predictions'], 
-                                                                 results['probabilities'], 
-                                                                 selected_stock)
-                        
-                        st.success("✅ Backtest tamamlandı!")
-                        
-                        # Sonuçları göster
-                        col1, col2, col3 = st.columns(3)
-                        
-                        # Performans metriklerini al
-                        performance_metrics = backtest_results.get('performance_metrics', {})
-                        
-                        with col1:
-                            st.metric("Toplam Getiri", f"%{backtest_results['total_return']*100:.1f}")
-                        with col2:
-                            st.metric("Kazanma Oranı", f"%{performance_metrics.get('win_rate', 0)*100:.1f}")
-                        with col3:
-                            st.metric("Sharpe Ratio", f"{performance_metrics.get('sharpe_ratio', 0):.2f}")
-                        
-                        # İşlem sayısı ve detaylı bilgi
-                        trades_count = len(backtest_results.get('trades', []))
-                        st.info(f"📊 Toplam İşlem Sayısı: {trades_count}")
-                        
-                        # Detaylı performans bilgileri
-                        st.subheader("📈 Detaylı Performans")
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            st.metric("Yıllık Getiri", f"%{performance_metrics.get('annualized_return', 0)*100:.1f}")
-                        with col2:
-                            st.metric("Max Drawdown", f"%{performance_metrics.get('max_drawdown', 0)*100:.1f}")
-                        with col3:
-                            st.metric("Volatilite", f"%{performance_metrics.get('volatility', 0)*100:.1f}")
-                        with col4:
-                            st.metric("Ort. İşlem Süresi", f"{performance_metrics.get('avg_trade_duration', 0):.1f} gün")
-                        
-                        # Kullanılan parametreler
-                        st.subheader("⚙️ Kullanılan Parametreler")
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.info(f"""
-                            **Risk Yönetimi:**
-                            - Güven Eşiği: {dynamic_confidence:.2f}
-                            - Stop Loss: %{dynamic_stop_loss*100:.0f}
-                            - Take Profit: %{dynamic_take_profit*100:.0f}
-                            """)
-                        
-                        with col2:
-                            st.info(f"""
-                            **Pozisyon Yönetimi:**
-                            - Pozisyon Büyüklüğü: %{dynamic_position_size*100:.0f}
-                            - Max Günlük İşlem: {dynamic_max_trades}
-                            - Model Karmaşıklığı: {dynamic_max_depth}
-                            """)
-                        
-                        with col3:
-                            st.info(f"""
-                            **Backtest Bilgileri:**
-                            - Başlangıç Sermayesi: {full_config['BACKTEST_CONFIG']['initial_capital']:,} TL
-                            - Final Sermayesi: {backtest_results.get('final_capital', 0):,.0f} TL
-                            - Komisyon: %{full_config['BACKTEST_CONFIG']['commission_rate']*100:.2f}
-                            """)
-                        
-                        if trades_count > 0:
-                            st.success("🎉 Model çalışıyor! İşlemler yapıldı.")
-                            
-                            # İşlem detayları
-                            with st.expander("🔍 İşlem Detayları", expanded=False):
-                                trades = backtest_results.get('trades', [])
-                                if trades:
-                                    trades_df = pd.DataFrame(trades)
-                                    st.dataframe(trades_df[['date', 'action', 'price', 'quantity', 'confidence', 'capital_after']])
-                        else:
-                            st.warning("⚠️ Henüz işlem yapılmadı. Parametreler ayarlanabilir.")
-                            st.info("💡 **Düşük getiri sebepleri:**")
-                            st.info("• Güven eşiği çok yüksek olabilir")
-                            st.info("• Pozisyon büyüklüğü çok küçük olabilir")
-                            st.info("• Model çok az sinyal üretiyor olabilir")
-                    
-                    except Exception as e:
-                        st.error(f"Backtest hatası: {str(e)}")
+                st.info("""
+                **📊 Backtest için:** Analiz & Veri sekmesindeki Backtest bölümünü kullanın.
+                
+                **🔮 Tahmin için:** Tahmin Karar sekmesinde model tahminleri yapabilirsiniz.
+                
+                **💼 Paper Trading için:** Paper Trading sekmesinde simüle edilmiş işlemler yapabilirsiniz.
+                """)
             
             except Exception as e:
                 st.error(f"Model eğitimi hatası: {str(e)}")

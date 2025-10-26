@@ -22,13 +22,13 @@ def load_config():
         return {}
 
 @st.cache_data(ttl=300)  # 5 dakika cache
-def load_stock_data(symbol, period="1y"):
+def load_stock_data(symbol, period="1y", interval="1d"):
     """Hisse verisi yükler - API call ile cache'li"""
     try:
         # Cache dosya yolu
         cache_dir = "data/raw"
         os.makedirs(cache_dir, exist_ok=True)
-        cache_file = os.path.join(cache_dir, f"{symbol.replace('.IS', '')}_cache.csv")
+        cache_file = os.path.join(cache_dir, f"{symbol.replace('.IS', '')}_{interval}_cache.csv")
         
         # Cache kontrolü
         if os.path.exists(cache_file):
@@ -37,15 +37,15 @@ def load_stock_data(symbol, period="1y"):
             if cache_age < 300:  # 5 dakikadan yeni
                 try:
                     data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
-                    st.sidebar.success(f"📦 Cache'den yüklendi: {symbol}")
+                    st.sidebar.success(f"📦 Cache'den yüklendi: {symbol} ({interval})")
                     return data
                 except:
                     pass
         
         # API'den veri çek
-        st.sidebar.info(f"🌐 API'den yükleniyor: {symbol}")
+        st.sidebar.info(f"🌐 API'den yükleniyor: {symbol} ({interval})")
         ticker = yf.Ticker(symbol)
-        data = ticker.history(period=period)
+        data = ticker.history(period=period, interval=interval)
         
         if data.empty:
             st.sidebar.error(f"❌ Veri bulunamadı: {symbol}")
@@ -58,7 +58,7 @@ def load_stock_data(symbol, period="1y"):
         
         # Cache'e kaydet
         data.to_csv(cache_file)
-        st.sidebar.success(f"✅ Veri yüklendi ve cache'lendi: {symbol}")
+        st.sidebar.success(f"✅ Veri yüklendi ve cache'lendi: {symbol} ({interval})")
         
         return data
         

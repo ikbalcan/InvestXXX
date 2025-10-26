@@ -160,6 +160,15 @@ def main():
         index=1
     )
     
+    # Zaman dilimi seçimi
+    st.sidebar.subheader("⏰ Zaman Dilimi")
+    interval = st.sidebar.selectbox(
+        "Zaman Dilimi:",
+        ["1d", "1h", "4h", "1wk"],
+        index=0,
+        help="Teknik analiz için zaman dilimini seçin"
+    )
+    
     # Cache yönetimi
     st.sidebar.subheader("🗂️ Cache Yönetimi")
     col1, col2 = st.sidebar.columns(2)
@@ -247,7 +256,7 @@ def main():
         
         # Veri yükle
         with st.spinner("Veri yükleniyor..."):
-            data = load_stock_data(selected_symbol, period)
+            data = load_stock_data(selected_symbol, period, interval)
         
         if data.empty:
             st.error("Veri yüklenemedi!")
@@ -317,6 +326,211 @@ def main():
         if not features_df.empty:
             indicators_chart = plot_technical_indicators(features_df)
             st.plotly_chart(indicators_chart, use_container_width=True)
+            
+            # Teknik indikatör açıklamaları - Collapsible
+            st.markdown("---")
+            st.markdown("""
+            <div style="text-align: center; margin: 20px 0;">
+                <h3 style="color: #495057; font-size: 1.5rem; margin: 0;">📚 İndikatör Açıklamaları</h3>
+                <p style="color: #6c757d; font-size: 1rem; margin: 5px 0 0 0;">Her indikatörün altında detaylı açıklama</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # RSI Collapsible
+            with st.expander("📈 RSI (Relative Strength Index) - Nasıl İncelenir?", expanded=False):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%); border-radius: 10px; padding: 20px; border-left: 4px solid #2196f3;">
+                    <div style="margin-bottom: 15px;">
+                        <h4 style="color: #1976d2; margin: 0 0 10px 0; font-size: 1.2rem;">🔍 Nasıl Okunur:</h4>
+                        <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                            <li><strong style="color: #d32f2f;">70+</strong>: Aşırı alım bölgesi → <span style="color: #d32f2f;">Satış sinyali</span></li>
+                            <li><strong style="color: #388e3c;">30-</strong>: Aşırı satım bölgesi → <span style="color: #388e3c;">Alış sinyali</span></li>
+                            <li><strong style="color: #f57c00;">50</strong>: Nötr seviye</li>
+                            <li><strong style="color: #7b1fa2;">Divergence</strong>: Fiyat ile RSI ters yönde hareket ederse trend değişimi habercisi</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 style="color: #1976d2; margin: 0 0 10px 0; font-size: 1.2rem;">💡 Kullanım Alanları:</h4>
+                        <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                            <li>Kısa vadeli alım/satım sinyalleri</li>
+                            <li>Momentum analizi</li>
+                            <li>Aşırı alım/satım tespiti</li>
+                        </ul>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # MACD Collapsible
+            with st.expander("📊 MACD (Moving Average Convergence Divergence) - Nasıl İncelenir?", expanded=False):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%); border-radius: 10px; padding: 20px; border-left: 4px solid #4caf50;">
+                    <div style="margin-bottom: 15px;">
+                        <h4 style="color: #2e7d32; margin: 0 0 10px 0; font-size: 1.2rem;">🔍 Nasıl Okunur:</h4>
+                        <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                            <li><strong style="color: #388e3c;">MACD > Signal</strong>: <span style="color: #388e3c;">Yükseliş momentumu</span></li>
+                            <li><strong style="color: #d32f2f;">MACD < Signal</strong>: <span style="color: #d32f2f;">Düşüş momentumu</span></li>
+                            <li><strong style="color: #f57c00;">Histogram</strong>: Momentum değişimini gösterir</li>
+                            <li><strong style="color: #7b1fa2;">Sıfır çizgisi</strong>: Trend değişim noktası</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 style="color: #2e7d32; margin: 0 0 10px 0; font-size: 1.2rem;">💡 Kullanım Alanları:</h4>
+                        <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                            <li>Trend değişim sinyalleri</li>
+                            <li>Momentum analizi</li>
+                            <li>Uzun vadeli trend takibi</li>
+                        </ul>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Bollinger Bands Collapsible
+            with st.expander("🎯 Bollinger Bands - Nasıl İncelenir?", expanded=False):
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%); border-radius: 10px; padding: 20px; border-left: 4px solid #ff9800;">
+                    <div style="margin-bottom: 15px;">
+                        <h4 style="color: #f57c00; margin: 0 0 10px 0; font-size: 1.2rem;">🔍 Nasıl Okunur:</h4>
+                        <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                            <li><strong style="color: #d32f2f;">Fiyat > Üst Band</strong>: Aşırı alım → <span style="color: #d32f2f;">Satış sinyali</span></li>
+                            <li><strong style="color: #388e3c;">Fiyat < Alt Band</strong>: Aşırı satım → <span style="color: #388e3c;">Alış sinyali</span></li>
+                            <li><strong style="color: #7b1fa2;">Band Daralması</strong>: Büyük hareket habercisi</li>
+                            <li><strong style="color: #f57c00;">Band Genişlemesi</strong>: Volatilite artışı</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 style="color: #f57c00; margin: 0 0 10px 0; font-size: 1.2rem;">💡 Kullanım Alanları:</h4>
+                        <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                            <li>Volatilite analizi</li>
+                            <li>Destek/direnç seviyeleri</li>
+                            <li>Breakout sinyalleri</li>
+                        </ul>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Teknik indikatör özeti
+            st.subheader("📊 Teknik İndikatör Özeti")
+            st.info("💡 **İpucu:** Bu değerler son günün teknik analizini gösterir. Birden fazla indikatörün aynı yönde sinyal vermesi daha güvenilir sonuçlar verir.")
+            
+            # Son değerler
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                if 'rsi' in features_df.columns:
+                    rsi_value = features_df['rsi'].iloc[-1]
+                    if rsi_value > 70:
+                        st.error(f"RSI: {rsi_value:.1f} (Aşırı Alım)")
+                    elif rsi_value < 30:
+                        st.success(f"RSI: {rsi_value:.1f} (Aşırı Satım)")
+                    else:
+                        st.info(f"RSI: {rsi_value:.1f} (Nötr)")
+            
+            with col2:
+                if 'macd' in features_df.columns and 'macd_signal' in features_df.columns:
+                    macd_value = features_df['macd'].iloc[-1]
+                    signal_value = features_df['macd_signal'].iloc[-1]
+                    if macd_value > signal_value:
+                        st.success(f"MACD: {macd_value:.3f} (Yükseliş)")
+                    else:
+                        st.error(f"MACD: {macd_value:.3f} (Düşüş)")
+            
+            with col3:
+                if 'bb_upper' in features_df.columns and 'bb_lower' in features_df.columns:
+                    current_price = features_df['close'].iloc[-1]
+                    bb_upper = features_df['bb_upper'].iloc[-1]
+                    bb_lower = features_df['bb_lower'].iloc[-1]
+                    
+                    if current_price > bb_upper:
+                        st.error(f"BB: Aşırı Alım")
+                    elif current_price < bb_lower:
+                        st.success(f"BB: Aşırı Satım")
+                    else:
+                        st.info(f"BB: Normal Seviye")
+            
+            with col4:
+                if 'sma_20' in features_df.columns and 'sma_50' in features_df.columns:
+                    sma_20 = features_df['sma_20'].iloc[-1]
+                    sma_50 = features_df['sma_50'].iloc[-1]
+                    current_price = features_df['close'].iloc[-1]
+                    
+                    if current_price > sma_20 > sma_50:
+                        st.success(f"SMA: Güçlü Yükseliş")
+                    elif current_price < sma_20 < sma_50:
+                        st.error(f"SMA: Güçlü Düşüş")
+                    else:
+                        st.warning(f"SMA: Karışık Sinyal")
+            
+            # Genel analiz önerisi
+            st.markdown("---")
+            st.subheader("🎯 Genel Analiz Önerisi")
+            
+            # Sinyal sayısını hesapla
+            buy_signals = 0
+            sell_signals = 0
+            
+            if 'rsi' in features_df.columns:
+                rsi_value = features_df['rsi'].iloc[-1]
+                if rsi_value < 30:
+                    buy_signals += 1
+                elif rsi_value > 70:
+                    sell_signals += 1
+            
+            if 'macd' in features_df.columns and 'macd_signal' in features_df.columns:
+                macd_value = features_df['macd'].iloc[-1]
+                signal_value = features_df['macd_signal'].iloc[-1]
+                if macd_value > signal_value:
+                    buy_signals += 1
+                else:
+                    sell_signals += 1
+            
+            if 'bb_upper' in features_df.columns and 'bb_lower' in features_df.columns:
+                current_price = features_df['close'].iloc[-1]
+                bb_upper = features_df['bb_upper'].iloc[-1]
+                bb_lower = features_df['bb_lower'].iloc[-1]
+                if current_price < bb_lower:
+                    buy_signals += 1
+                elif current_price > bb_upper:
+                    sell_signals += 1
+            
+            if 'sma_20' in features_df.columns and 'sma_50' in features_df.columns:
+                sma_20 = features_df['sma_20'].iloc[-1]
+                sma_50 = features_df['sma_50'].iloc[-1]
+                current_price = features_df['close'].iloc[-1]
+                if current_price > sma_20 > sma_50:
+                    buy_signals += 1
+                elif current_price < sma_20 < sma_50:
+                    sell_signals += 1
+            
+            # Genel öneri
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("🟢 Alış Sinyalleri", buy_signals)
+            
+            with col2:
+                st.metric("🔴 Satış Sinyalleri", sell_signals)
+            
+            with col3:
+                if buy_signals > sell_signals:
+                    st.success("📈 Genel Trend: Yükseliş")
+                elif sell_signals > buy_signals:
+                    st.error("📉 Genel Trend: Düşüş")
+                else:
+                    st.warning("⚖️ Genel Trend: Nötr")
+            
+            # Detaylı öneri
+            if buy_signals >= 3:
+                st.success("🚀 **Güçlü Alış Sinyali:** Çoğu indikatör alış yönünde sinyal veriyor!")
+            elif sell_signals >= 3:
+                st.error("⚠️ **Güçlü Satış Sinyali:** Çoğu indikatör satış yönünde sinyal veriyor!")
+            elif buy_signals > sell_signals:
+                st.info("📈 **Hafif Yükseliş Eğilimi:** Alış sinyalleri daha fazla")
+            elif sell_signals > buy_signals:
+                st.info("📉 **Hafif Düşüş Eğilimi:** Satış sinyalleri daha fazla")
+            else:
+                st.warning("⚖️ **Karışık Sinyaller:** İndikatörler farklı yönlerde sinyal veriyor")
             
             # Özellik özeti
             st.subheader("Özellik Özeti")

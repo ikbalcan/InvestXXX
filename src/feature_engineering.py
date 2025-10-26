@@ -46,6 +46,7 @@ class FeatureEngineer:
         features_df['macd'] = ta.trend.macd(features_df['close'])
         features_df['macd_signal'] = ta.trend.macd_signal(features_df['close'])
         features_df['macd_diff'] = features_df['macd'] - features_df['macd_signal']
+        features_df['macd_histogram'] = features_df['macd'] - features_df['macd_signal']
         
         # Moving averages
         for period in [5, 10, 20, 50]:
@@ -57,8 +58,11 @@ class FeatureEngineer:
         features_df['sma_10_50_cross'] = np.where(features_df['sma_10'] > features_df['sma_50'], 1, 0)
         
         # Bollinger Bands
-        bb = ta.volatility.bollinger_hband_indicator(features_df['close'])
-        features_df['bb_position'] = (features_df['close'] - features_df['sma_20']) / bb
+        features_df['bb_upper'] = ta.volatility.bollinger_hband_indicator(features_df['close'])
+        features_df['bb_lower'] = ta.volatility.bollinger_lband_indicator(features_df['close'])
+        features_df['bb_middle'] = features_df['sma_20']  # Orta band SMA 20
+        features_df['bb_width'] = (features_df['bb_upper'] - features_df['bb_lower']) / features_df['bb_middle']
+        features_df['bb_position'] = (features_df['close'] - features_df['bb_lower']) / (features_df['bb_upper'] - features_df['bb_lower'])
         
         # Volume özellikleri
         features_df['volume_sma_20'] = features_df['volume'].rolling(20).mean()
@@ -154,15 +158,15 @@ class FeatureEngineer:
         # Volatilite hesapla
         volatility = features_df['returns'].rolling(20).std().mean() * np.sqrt(252)
         
-        # Volatiliteye göre dinamik threshold belirle
+        # Volatiliteye göre dinamik threshold belirle - Daha esnek
         if volatility <= 0.25:
-            threshold = 0.01  # %1+ hareket
+            threshold = 0.005  # %0.5+ hareket (daha esnek)
         elif volatility <= 0.40:
-            threshold = 0.015  # %1.5+ hareket
+            threshold = 0.008  # %0.8+ hareket
         elif volatility <= 0.60:
-            threshold = 0.02  # %2+ hareket
+            threshold = 0.012  # %1.2+ hareket
         else:
-            threshold = 0.03  # %3+ hareket
+            threshold = 0.015  # %1.5+ hareket (daha esnek)
         
         logger.info(f"Volatilite: %{volatility*100:.1f}, Threshold: %{threshold*100:.1f}")
         
