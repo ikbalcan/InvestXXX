@@ -148,6 +148,14 @@ class StockDirectionPredictor:
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_test_scaled = self.scaler.transform(X_test)
         
+        # Class imbalance check and weight calculation
+        y_train_counts = y_train.value_counts()
+        if len(y_train_counts) == 2:
+            scale_pos_weight = y_train_counts[0] / y_train_counts[1]
+            logger.info(f"Class distribution: {y_train_counts.to_dict()}, scale_pos_weight: {scale_pos_weight:.2f}")
+        else:
+            scale_pos_weight = 1.0
+        
         # XGBoost parametreleri (volatilite bazlı)
         xgb_params = {
             'objective': 'binary:logistic',
@@ -160,6 +168,7 @@ class StockDirectionPredictor:
             'min_child_weight': volatility_config.get('min_child_weight', 5),
             'reg_alpha': volatility_config.get('reg_alpha', 0.1),
             'reg_lambda': volatility_config.get('reg_lambda', 0.1),
+            'scale_pos_weight': scale_pos_weight,  # Class imbalance için
             'random_state': 42,
             'n_jobs': -1
         }

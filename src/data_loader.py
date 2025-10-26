@@ -20,20 +20,23 @@ class DataLoader:
         self.data_dir = "data/raw"
         os.makedirs(self.data_dir, exist_ok=True)
         
-    def fetch_stock_data(self, symbol: str, period: str = "2y") -> pd.DataFrame:
+    def fetch_stock_data(self, symbol: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
         """
         Tek bir hisse senedi için veri çeker
         
         Args:
             symbol: Hisse senedi sembolü (örn: "THYAO.IS")
             period: Veri periyodu ("1y", "2y", "5y", "max")
+            interval: Zaman dilimi ("1d", "1h", "4h", "1wk")
             
         Returns:
             OHLCV verisi içeren DataFrame
         """
         try:
             ticker = yf.Ticker(symbol)
-            data = ticker.history(period=period)
+            
+            # Interval parametresi ile veri çek
+            data = ticker.history(period=period, interval=interval)
             
             if data.empty:
                 logger.warning(f"Veri bulunamadı: {symbol}")
@@ -46,11 +49,16 @@ class DataLoader:
             # Eksik değerleri temizle
             data = data.dropna()
             
-            # Volume kontrolü
-            min_volume = self.config.get('MODEL_CONFIG', {}).get('min_volume_threshold', 1000000)
+            # Volume kontrolü (interval'e göre dinamik threshold)
+            if interval in ["1h", "4h"]:
+                # Saatlik veriler için daha düşük volume threshold
+                min_volume = self.config.get('MODEL_CONFIG', {}).get('min_volume_threshold', 1000000) / 8
+            else:
+                min_volume = self.config.get('MODEL_CONFIG', {}).get('min_volume_threshold', 1000000)
+            
             data = data[data['volume'] >= min_volume]
             
-            logger.info(f"{symbol} için {len(data)} günlük veri yüklendi")
+            logger.info(f"{symbol} için {len(data)} {interval} veri yüklendi")
             return data
             
         except Exception as e:

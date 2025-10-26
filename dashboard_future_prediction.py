@@ -21,13 +21,40 @@ from dashboard_utils import load_config, load_stock_data
 from src.export_utils import create_export_buttons
 
 @st.cache_data
-def create_features(data):
+def create_features(data, config=None, interval="1d"):
     """Özellikler oluşturur"""
     try:
-        engineer = FeatureEngineer(load_config())
+        if config is None:
+            config = load_config()
+        
+        # Interval'ı config'e ekle
+        if 'MODEL_CONFIG' not in config:
+            config['MODEL_CONFIG'] = {}
+        config['MODEL_CONFIG']['interval'] = interval
+        
+        engineer = FeatureEngineer(config)
         return engineer.create_all_features(data)
     except:
         return pd.DataFrame()
+
+def remove_duplicate_factors(factors):
+    """Tekrar eden faktörleri temizler"""
+    seen = set()
+    clean_factors = {
+        'positive': [],
+        'negative': [],
+        'neutral': []
+    }
+    
+    for category in ['positive', 'negative', 'neutral']:
+        for factor in factors[category]:
+            # Emoji ve sayıları temizle, karşılaştırma için normalize et
+            normalized = factor.split(' - ')[-1].lower().strip()
+            if normalized not in seen:
+                seen.add(normalized)
+                clean_factors[category].append(factor)
+    
+    return clean_factors
 
 def analyze_prediction_factors(data, features_df, prediction, confidence, model_metrics):
     """
@@ -73,11 +100,11 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
                 factors['positive'].append(f"📈 Yükseliş trendi - Kısa vadeli ortalama uzun vadeli ortalamanın üzerinde")
             else:
                 factors['negative'].append(f"⚠️ Trend tersine dönebilir - Yükseliş trendi zayıflayabilir")
+    else:
+        if prediction == 0:
+            factors['positive'].append(f"📉 Düşüş trendi - Kısa vadeli ortalama uzun vadeli ortalamanın altında")
         else:
-            if prediction == 0:
-                factors['positive'].append(f"📉 Düşüş trendi - Kısa vadeli ortalama uzun vadeli ortalamanın altında")
-            else:
-                factors['positive'].append(f"🔄 Trend tersine dönebilir - Düşüş trendi zayıflayabilir")
+            factors['negative'].append(f"⚠️ Düşüş trendi var - Yükseliş önünde engel")
     
     # 3. Hacim Analizi
     if 'volume' in features_df.columns:
@@ -108,7 +135,7 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
             if prediction == 0:
                 factors['positive'].append(f"📉 Son 3 günde güçlü düşüş - Düşüş momentumu devam ediyor")
             else:
-                factors['positive'].append(f"💎 Son 3 günde güçlü düşüş - Aşırı satım fırsatı")
+                factors['negative'].append(f"⚠️ Son 3 günde güçlü düşüş - Yükseliş için olumsuz")
         else:
             factors['neutral'].append(f"📊 Son 3 günde fiyat stabil - Belirsizlik")
     
@@ -287,7 +314,7 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
             if prediction == 0:
                 factors['positive'].append(f"3 gün üst üste düşüş - Güçlü düşüş kalıbı")
             else:
-                factors['positive'].append(f"3 gün üst üste düşüş - Aşırı satım fırsatı")
+                factors['negative'].append(f"⚠️ 3 gün üst üste düşüş - Yükseliş için olumsuz")
     
     # 17. Gap Analizi
     if len(data) >= 2:
@@ -302,7 +329,7 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
             if prediction == 0:
                 factors['positive'].append(f"Aşağı gap (%{abs(gap)*100:.1f}) - Güçlü düşüş sinyali")
             else:
-                factors['positive'].append(f"Aşağı gap (%{abs(gap)*100:.1f}) - Aşırı satım fırsatı")
+                factors['negative'].append(f"⚠️ Aşağı gap (%{abs(gap)*100:.1f}) - Yükseliş için olumsuz")
     
     # 18. Modelin Gerçek Özelliklerini Analiz Et - Kullanıcı Dostu
     if not features_df.empty:
@@ -320,10 +347,10 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
                         else:
                             factors['negative'].append(f"⚠️ Momentum tersine dönebilir - Trend riski")
         
-        # Volatilite özellikleri - Kullanıcı dostu açıklamalar
+        # Volatilite özellikleri - Kullanıcı dostu açıklamalar (sadece 1 kez ekle)
         volatility_features = [col for col in features_df.columns if 'volatility' in col.lower() or 'std' in col.lower()]
         if volatility_features:
-            for feature in volatility_features[:2]:  # İlk 2 volatilite özelliği
+            for feature in volatility_features[:1]:  # Sadece 1 volatilite özelliği
                 if feature in last_data.index:
                     value = last_data[feature]
                     if value > 0.3:  # Yüksek volatilite
@@ -348,7 +375,7 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
         # Hacim özellikleri - Kullanıcı dostu açıklamalar
         volume_features = [col for col in features_df.columns if 'volume' in col.lower() and 'ratio' in col.lower()]
         if volume_features:
-            for feature in volume_features[:2]:  # İlk 2 hacim oranı özelliği
+            for feature in volume_features[:1]:  # Sadece 1 hacim özelliği
                 if feature in last_data.index:
                     value = last_data[feature]
                     if value > 1.5:  # Ortalamadan %50 fazla hacim
@@ -359,10 +386,10 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
                     elif value < 0.5:  # Ortalamadan %50 az hacim
                         factors['negative'].append(f"😴 Düşük işlem hacmi - Zayıf piyasa katılımı")
         
-        # Zaman özellikleri - Kullanıcı dostu açıklamalar
+        # Zaman özellikleri - Kullanıcı dostu açıklamalar (sadece 1 kez ekle)
         time_features = [col for col in features_df.columns if 'day' in col.lower() or 'week' in col.lower() or 'month' in col.lower()]
         if time_features:
-            for feature in time_features[:2]:  # İlk 2 zaman özelliği
+            for feature in time_features[:1]:  # Sadece 1 zaman özelliği
                 if feature in last_data.index:
                     value = last_data[feature]
                     if value > 0.5:  # Pozitif zaman etkisi
@@ -370,16 +397,19 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
                     elif value < -0.5:  # Negatif zaman etkisi
                         factors['negative'].append(f"📅 Zaman dezavantajı - Bu dönemde genelde negatif performans")
     
+    # Tekrar eden faktörleri temizle
+    factors = remove_duplicate_factors(factors)
+    
     return factors
 
-def train_model_for_symbol(symbol, config, progress_callback=None):
+def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"):
     """Tek hisse için model eğitimi"""
     try:
         if progress_callback:
             progress_callback(f"📊 {symbol} verisi yükleniyor...")
         
         # Veri yükle
-        data = load_stock_data(symbol, "2y")
+        data = load_stock_data(symbol, "2y", interval=interval)
         if data.empty:
             return False, f"{symbol} verisi yüklenemedi"
         
@@ -388,7 +418,13 @@ def train_model_for_symbol(symbol, config, progress_callback=None):
         
         # Özellikler oluştur
         try:
-            engineer = FeatureEngineer(config)
+            # Interval'ı config'e ekle
+            config_with_interval = config.copy()
+            if 'MODEL_CONFIG' not in config_with_interval:
+                config_with_interval['MODEL_CONFIG'] = {}
+            config_with_interval['MODEL_CONFIG']['interval'] = interval
+            
+            engineer = FeatureEngineer(config_with_interval)
             features_df = engineer.create_all_features(data)
         except Exception as e:
             return False, f"{symbol} özellikler oluşturulamadı: {str(e)}"
@@ -519,11 +555,11 @@ def analyze_model_info(model_data, features_df):
     
     return model_info
 
-def show_future_prediction_tab(selected_symbol, config):
+def show_future_prediction_tab(selected_symbol, config, interval="1d"):
     """Gelecek Tahmin Tab"""
     
     st.header("🔮 Gelecek Tahmin")
-    st.info("🎯 Bu sekme hissenin **bir sonraki hamlesini** tahmin eder ve size net sinyal verir!")
+    st.info(f"🎯 Bu sekme hissenin **bir sonraki hamlesini** tahmin eder ve size net sinyal verir! (Zaman Dilimi: {interval})")
     
     # Model seçimi - Otomatik hisse bazlı seçim
     model_files = []
@@ -573,7 +609,7 @@ def show_future_prediction_tab(selected_symbol, config):
                             progress_bar.progress(progress)
                         
                         # Model eğit
-                        success, message = train_model_for_symbol(selected_symbol, config, update_progress)
+                        success, message = train_model_for_symbol(selected_symbol, config, update_progress, interval=interval)
                         
                         if success:
                             st.success(f"✅ {message}")
@@ -639,7 +675,7 @@ def show_future_prediction_tab(selected_symbol, config):
                                     def update_status(message):
                                         status_text.text(message)
                                     
-                                    success, message = train_model_for_symbol(selected_symbol, config, update_status)
+                                    success, message = train_model_for_symbol(selected_symbol, config, update_status, interval=interval)
                                     
                                     if success:
                                         st.success(f"✅ {message}")
@@ -663,8 +699,8 @@ def show_future_prediction_tab(selected_symbol, config):
                                         st.error(f"❌ Silme hatası: {str(e)}")
                         else:
                             # Güncel veri yükle
-                            data = load_stock_data(selected_symbol, "1y")
-                            features_df = create_features(data)
+                            data = load_stock_data(selected_symbol, "1y", interval=interval)
+                            features_df = create_features(data, config=config, interval=interval)
                             
                             if features_df.empty:
                                 st.error("❌ Özellikler oluşturulamadı!")
@@ -1305,13 +1341,21 @@ def show_future_prediction_tab(selected_symbol, config):
                             st.subheader("🔍 Tahmin Sebepleri")
                             st.info("💡 Bu tahminin hangi faktörlere dayandığını görün:")
                             
+                            # Başlıkları belirle (AL veya SAT sinyaline göre)
+                            if last_prediction == 1:  # AL sinyali
+                                col1_title = "✅ Yükselişi Destekleyen"
+                                col2_title = "❌ Yükselişi Engelleyen"
+                            else:  # SAT sinyali
+                                col1_title = "✅ Düşüşü Destekleyen"
+                                col2_title = "❌ Düşüşü Engelleyen"
+                            
                             # Olumlu faktörler, olumsuz faktörler ve riskler
                             col1, col2, col3 = st.columns(3)
                             
                             with col1:
-                                st.markdown("""
+                                st.markdown(f"""
                                 <div style="background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); padding: 20px; border-radius: 15px; border-left: 5px solid #28a745;">
-                                    <h3 style="color: #155724; margin: 0 0 15px 0;">✅ Olumlu Faktörler</h3>
+                                    <h3 style="color: #155724; margin: 0 0 15px 0;">{col1_title}</h3>
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
@@ -1325,14 +1369,14 @@ def show_future_prediction_tab(selected_symbol, config):
                                 else:
                                     st.markdown("""
                                     <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; color: #6c757d;">
-                                        <em>Bu tahmin için özel olumlu faktör bulunamadı</em>
+                                        <em>Bu tahmin için özel faktör bulunamadı</em>
                                     </div>
                                     """, unsafe_allow_html=True)
                             
                             with col2:
-                                st.markdown("""
+                                st.markdown(f"""
                                 <div style="background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%); padding: 20px; border-radius: 15px; border-left: 5px solid #dc3545;">
-                                    <h3 style="color: #721c24; margin: 0 0 15px 0;">❌ Olumsuz Faktörler</h3>
+                                    <h3 style="color: #721c24; margin: 0 0 15px 0;">{col2_title}</h3>
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
@@ -1346,7 +1390,7 @@ def show_future_prediction_tab(selected_symbol, config):
                                 else:
                                     st.markdown("""
                                     <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; color: #6c757d;">
-                                        <em>Bu tahmin için özel olumsuz faktör bulunamadı</em>
+                                        <em>Bu tahmin için özel faktör bulunamadı</em>
                                     </div>
                                     """, unsafe_allow_html=True)
                             

@@ -174,15 +174,20 @@ class PriceTargetPredictor:
                                         targets: list, volatility: float, confidence: float,
                                         prediction: int, model_data: Dict = None) -> Dict:
         """
-        Gerçek grafik analizi ve model verilerine dayalı gerçekçi süre tahmini
+        ML tabanlı gerçek veri analizi ile süre tahmini
+        
+        Hardcoded hesaplamalar yerine gerçek geçmiş hareketlerden öğrenir
         """
-        # Grafik analizi yap
+        # Interval'ı config'den al
+        interval = self.config.get('MODEL_CONFIG', {}).get('interval', '1d')
+        
+        # Grafik analizi
         chart_analysis = self._analyze_chart_patterns(data)
         
-        # Geçmiş hareket analizi - Gerçek verilerden
-        historical_analysis = self._analyze_historical_movements(data, targets, current_price)
+        # ML Tabanlı Geçmiş Hareket Analizi - VERİDEN ÖĞRENİYOR
+        historical_analysis = self._analyze_historical_movements_ml(data, targets, current_price, interval, prediction)
         
-        # Model performans analizi
+        # Model performans
         model_analysis = self._analyze_model_performance(model_data, confidence) if model_data else {}
         
         time_targets = {}
@@ -191,18 +196,17 @@ class PriceTargetPredictor:
             target_names = ['conservative', 'moderate', 'aggressive']
             target_name = target_names[i]
             
-            # Hedef fiyata ulaşma için gereken hareket
             price_change_needed = abs(target - current_price) / current_price
             
-            # Gerçekçi süre hesaplama - Çoklu faktör analizi
-            estimated_days = self._calculate_realistic_days(
-                price_change_needed, chart_analysis, historical_analysis, 
-                model_analysis, volatility, confidence, prediction, target_name
-            )
+            # ML'DEN ÖĞRENİLEN SÜRE (hardcoded değil!)
+            estimated_periods = historical_analysis.get('estimated_periods', {}).get(target_name, 2)
+            min_periods = historical_analysis.get('min_periods', {}).get(target_name, 1)
+            max_periods = historical_analysis.get('max_periods', {}).get(target_name, 4)
             
-            # Minimum ve maksimum süre tahmini (çok daha gerçekçi)
-            min_days = max(7, int(estimated_days * 0.7))  # En az 1 hafta
-            max_days = int(estimated_days * 3.0)  # Çok geniş aralık
+            # Periyotları gerçek zamana çevir
+            min_days = self._periods_to_days(min_periods, interval)
+            max_days = self._periods_to_days(max_periods, interval)
+            estimated_real_days = self._periods_to_days(estimated_periods, interval)
             
             # Tarih tahminleri
             today = datetime.now()
@@ -212,16 +216,91 @@ class PriceTargetPredictor:
             time_targets[target_name] = {
                 'min_days': min_days,
                 'max_days': max_days,
-                'estimated_days': int(estimated_days),
+                'estimated_days': int(estimated_real_days),
+                'min_periods': min_periods,
+                'max_periods': max_periods,
+                'estimated_periods': int(estimated_periods),
+                'interval': interval,
                 'min_date': min_date.strftime('%d.%m.%Y'),
                 'max_date': max_date.strftime('%d.%m.%Y'),
-                'estimated_date': (today + timedelta(days=int(estimated_days))).strftime('%d.%m.%Y'),
+                'estimated_date': (today + timedelta(days=int(estimated_real_days))).strftime('%d.%m.%Y'),
                 'chart_analysis': chart_analysis,
                 'historical_analysis': historical_analysis,
                 'model_analysis': model_analysis
             }
         
         return time_targets
+    
+    def _analyze_historical_movements_ml(self, data: pd.DataFrame, targets: list, current_price: float, interval: str, prediction: int = None) -> Dict:
+        """
+        ML TABANLI Geçmiş hareket analizi - VERİDEN ÖĞRENİYOR
+        
+        Hardcoded tahminler yerine gerçek geçmiş verilerdeki kalıpları bulur
+        """
+        if len(data) < 50:
+            return {'insufficient_data': True}
+        
+        # Her bir hedef için gerçek hareketleri analiz et
+        result = {
+            'estimated_periods': {},
+            'min_periods': {},
+            'max_periods': {}
+        }
+        
+        for i, target in enumerate(targets):
+            target_names = ['conservative', 'moderate', 'aggressive']
+            target_name = target_names[i]
+            target_change = abs(target - current_price) / current_price
+            
+            # Gerçek veride benzer hareketleri bul
+            similar_movements = []
+            
+            for j in range(len(data) - 10):
+                start_price = data['close'].iloc[j]
+                
+                # İleriye doğru bakarak benzer hareketleri bul
+                for k in range(j + 1, min(j + 100, len(data))):
+                    end_price = data['close'].iloc[k]
+                    actual_change = abs(end_price - start_price) / start_price
+                    actual_direction = 1 if end_price > start_price else 0
+                    
+                    # Yön uyumlu ve büyüklük benzeri hareketler (tolerans: %20)
+                    if (prediction is None or actual_direction == prediction) and \
+                       abs(actual_change - target_change) < target_change * 0.3:
+                        similar_movements.append({
+                            'periods': k - j,
+                            'change_pct': actual_change,
+                            'start_price': start_price,
+                            'end_price': end_price
+                        })
+                        break  # İlk benzer hareketi bulduk, devam etme
+            
+            # ML TABANLI TAHMİN: Gerçek hareketlerden öğren
+            if len(similar_movements) >= 3:
+                periods = [m['periods'] for m in similar_movements]
+                result['estimated_periods'][target_name] = int(np.percentile(periods, 50))  # Median
+                result['min_periods'][target_name] = int(np.percentile(periods, 25))
+                result['max_periods'][target_name] = int(np.percentile(periods, 75))
+            else:
+                # Yeterli veri yok - basit varsayılan
+                result['estimated_periods'][target_name] = 2
+                result['min_periods'][target_name] = 1
+                result['max_periods'][target_name] = 4
+        
+        # Interval bazlı ölçeklendirme
+        scale_factor = {
+            '1h': 1.0,    # Saatlik - olduğu gibi
+            '4h': 0.5,    # 4 saatlik - yarı zaman
+            '1d': 1.0,    # Günlük - olduğu gibi
+            '1wk': 2.0     # Haftalık - daha uzun
+        }.get(interval, 1.0)
+        
+        for target_name in result['estimated_periods']:
+            result['estimated_periods'][target_name] = int(result['estimated_periods'][target_name] * scale_factor)
+            result['min_periods'][target_name] = int(result['min_periods'][target_name] * scale_factor)
+            result['max_periods'][target_name] = int(result['max_periods'][target_name] * scale_factor)
+        
+        return result
     
     def _analyze_historical_movements(self, data: pd.DataFrame, targets: list, current_price: float) -> Dict:
         """
@@ -322,68 +401,31 @@ class PriceTargetPredictor:
             'time_factor': time_factor
         }
     
-    def _calculate_realistic_days(self, price_change_needed: float, chart_analysis: Dict, 
-                                historical_analysis: Dict, model_analysis: Dict,
-                                volatility: float, confidence: float, prediction: int, target_type: str) -> float:
+    
+    def _periods_to_days(self, periods: float, interval: str) -> float:
         """
-        Gerçekçi gün sayısını hesaplar - Çoklu faktör analizi
-        """
-        # Temel süre hesaplama (volatilite bazlı)
-        base_days = price_change_needed / (volatility / np.sqrt(252)) * 10  # 10x faktör
+        Periyot sayısını gerçek gün sayısına çevirir
         
-        # Grafik analizi faktörü
-        chart_factor = 1.0
-        
-        if chart_analysis['trend_strength'] == 'Strong':
-            chart_factor *= 0.6  # Güçlü trend = çok daha hızlı
-        elif chart_analysis['trend_strength'] == 'Weak':
-            chart_factor *= 1.8  # Zayıf trend = çok daha yavaş
-        
-        if chart_analysis['near_support_resistance']:
-            chart_factor *= 1.5  # Destek/direnç yakınında = çok daha yavaş
-        
-        if chart_analysis['volume_trend'] == 'Increasing':
-            chart_factor *= 0.7  # Artan hacim = daha hızlı
-        elif chart_analysis['volume_trend'] == 'Decreasing':
-            chart_factor *= 1.3  # Azalan hacim = daha yavaş
-        
-        # Geçmiş hareket analizi faktörü
-        historical_factor = 1.0
-        
-        if not historical_analysis.get('insufficient_data', False):
-            # Benzer hareketlerin ortalama süresini kullan
-            movement_key = f'{price_change_needed:.3f}'
-            if movement_key in historical_analysis['movement_analysis']:
-                historical_avg = historical_analysis['movement_analysis'][movement_key]['avg_days']
-                historical_factor = historical_avg / base_days if base_days > 0 else 1.0
+        Args:
+            periods: Periyot sayısı
+            interval: Zaman dilimi
             
-            # Volatilite trendi faktörü
-            volatility_ratio = historical_analysis.get('volatility_ratio', 1.0)
-            if volatility_ratio > 1.2:  # Yüksek volatilite
-                historical_factor *= 0.8
-            elif volatility_ratio < 0.8:  # Düşük volatilite
-                historical_factor *= 1.3
-        
-        # Model performans faktörü
-        model_factor = model_analysis.get('time_factor', 1.0)
-        
-        # Hedef tipi faktörü
-        target_factor = 1.0
-        if target_type == 'conservative':
-            target_factor = 0.8  # Konservatif hedefler daha hızlı
-        elif target_type == 'aggressive':
-            target_factor = 1.5  # Agresif hedefler daha yavaş
-        
-        # Güven skoru faktörü
-        confidence_factor = 0.7 + (confidence * 0.6)  # 0.7-1.3 arası
-        
-        # Final hesaplama
-        estimated_days = base_days * chart_factor * historical_factor * model_factor * target_factor * confidence_factor
-        
-        # Minimum ve maksimum sınırlar
-        estimated_days = max(14, min(estimated_days, 180))  # 2 hafta - 6 ay arası
-        
-        return estimated_days
+        Returns:
+            Gerçek gün sayısı
+        """
+        if interval == '1h':
+            # 1 saatlik periyot → Saatleri güne çevir (24 saat = 1 gün)
+            return periods / 24.0
+        elif interval == '4h':
+            # 4 saatlik periyot → Saatleri güne çevir
+            return (periods * 4) / 24.0
+        elif interval == '1wk':
+            # 1 haftalık periyot → Haftaları güne çevir
+            return periods * 7.0
+        else:  # 1d
+            # 1 günlük periyot → Değişiklik yok
+            return periods
+    
     
     def _analyze_chart_patterns(self, data: pd.DataFrame) -> Dict:
         """

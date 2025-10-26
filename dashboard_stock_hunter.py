@@ -405,40 +405,60 @@ def create_stock_comparison_chart(results_df):
     """Hisse karşılaştırma grafiği"""
     fig = make_subplots(
         rows=2, cols=2,
-        subplot_titles=('Fiyat Değişimi (%)', 'Volatilite (%)', 'Hacim Oranı', 'Teknik Skor'),
+        subplot_titles=(
+            'Son 1 Haftalık Fiyat Performansı (%)', 
+            'Fiyat Dalgalanması - Risk Seviyesi (%)', 
+            'İşlem Hacmi (Günlük/Ortalama)', 
+            'RSI Göstergesi - Aşırı Alım/Satım'
+        ),
         specs=[[{"secondary_y": False}, {"secondary_y": False}],
                [{"secondary_y": False}, {"secondary_y": False}]]
     )
     
-    # Fiyat değişimi
+    # 1 haftalık fiyat değişimi
     fig.add_trace(
         go.Bar(x=results_df['symbol'], y=results_df['price_change_1w'], 
-               name='1 Hafta', marker_color='lightblue'),
+               name='1 Hafta Performansı', marker_color='lightblue',
+               hovertemplate='<b>%{x}</b><br>1 Haftalık Değişim: %{y:.2f}%<extra></extra>'),
         row=1, col=1
     )
     
-    # Volatilite
+    # Volatilite (Risk seviyesi)
     fig.add_trace(
         go.Bar(x=results_df['symbol'], y=results_df['volatility'], 
-               name='Volatilite', marker_color='orange'),
+               name='Fiyat Dalgalanması', marker_color='orange',
+               hovertemplate='<b>%{x}</b><br>Risk Seviyesi: %{y:.2f}%<br><i>Düşük = Kararlı, Yüksek = Riskli</i><extra></extra>'),
         row=1, col=2
     )
     
-    # Hacim oranı
+    # Hacim oranı (Günlük/ortalama)
     fig.add_trace(
         go.Bar(x=results_df['symbol'], y=results_df['volume_ratio'], 
-               name='Hacim Oranı', marker_color='green'),
+               name='Hacim Oranı', marker_color='green',
+               hovertemplate='<b>%{x}</b><br>Günlük/Ortalama: %{y:.2f}x<br><i>1x = Normal, &gt;1.5x = İlgi Artışı</i><extra></extra>'),
         row=2, col=1
     )
     
-    # Teknik skor (RSI bazlı)
+    # RSI göstergesi
     fig.add_trace(
         go.Bar(x=results_df['symbol'], y=results_df['rsi'], 
-               name='RSI', marker_color='red'),
+               name='RSI', marker_color='red',
+               hovertemplate='<b>%{x}</b><br>RSI: %{y:.1f}<br><i>&lt;30 = Aşırı Satım, &gt;70 = Aşırı Alım</i><extra></extra>'),
         row=2, col=2
     )
     
-    fig.update_layout(height=600, showlegend=False, title_text="Hisse Karşılaştırma Analizi")
+    # Y ekseni başlıklarını güncelle
+    fig.update_yaxes(title_text="Değişim (%)", row=1, col=1)
+    fig.update_yaxes(title_text="Volatilite (%)", row=1, col=2)
+    fig.update_yaxes(title_text="Hacim Oranı", row=2, col=1)
+    fig.update_yaxes(title_text="RSI Değeri", row=2, col=2)
+    
+    fig.update_layout(
+        height=600, 
+        showlegend=False, 
+        title_text="Hisse Karşılaştırma Analizi",
+        hovermode='closest'
+    )
     return fig
 
 def show_stock_hunter_tab(bist_stocks, all_symbols, config):

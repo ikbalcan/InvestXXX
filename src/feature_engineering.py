@@ -147,7 +147,19 @@ class FeatureEngineer:
         """
         features_df = df.copy()
         
-        prediction_horizon = self.config.get('MODEL_CONFIG', {}).get('prediction_horizon', 1)
+        # Interval'a göre prediction horizon belirle
+        interval = self.config.get('MODEL_CONFIG', {}).get('interval', '1d')
+        if interval == '1h':
+            prediction_horizon = 4  # 4 saat sonra
+        elif interval == '4h':
+            prediction_horizon = 2  # 2 periyot sonra (8 saat)
+        elif interval == '1wk':
+            prediction_horizon = 1  # 1 hafta sonra
+        else:  # 1d
+            prediction_horizon = 1  # 1 gün sonra
+        
+        # Config'den override varsa kullan
+        prediction_horizon = self.config.get('MODEL_CONFIG', {}).get('prediction_horizon', prediction_horizon)
         
         # Gelecek fiyat
         features_df['future_price'] = features_df['close'].shift(-prediction_horizon)
@@ -158,24 +170,32 @@ class FeatureEngineer:
         # Volatilite hesapla
         volatility = features_df['returns'].rolling(20).std().mean() * np.sqrt(252)
         
-        # Volatiliteye göre dinamik threshold belirle - Daha esnek
+        # Volatiliteye göre dinamik threshold belirle - Daha dengeli yaklaşım
         if volatility <= 0.25:
-            threshold = 0.005  # %0.5+ hareket (daha esnek)
+            threshold_up = 0.002   # %0.2+ hareket (Yukarı için)
+            threshold_down = -0.002  # %-0.2- hareket (Aşağı için)
         elif volatility <= 0.40:
-            threshold = 0.008  # %0.8+ hareket
+            threshold_up = 0.003   # %0.3+ hareket
+            threshold_down = -0.003  # %-0.3- hareket
         elif volatility <= 0.60:
-            threshold = 0.012  # %1.2+ hareket
+            threshold_up = 0.005   # %0.5+ hareket
+            threshold_down = -0.005  # %-0.5- hareket
         else:
-            threshold = 0.015  # %1.5+ hareket (daha esnek)
+            threshold_up = 0.008   # %0.8+ hareket
+            threshold_down = -0.008  # %-0.8- hareket
         
-        logger.info(f"Volatilite: %{volatility*100:.1f}, Threshold: %{threshold*100:.1f}")
+        logger.info(f"Volatilite: %{volatility*100:.1f}, Threshold Up: %{threshold_up*100:.1f}, Threshold Down: %{threshold_down*100:.1f}")
         
         # Yön sınıflandırması (volatilite bazlı)
-        features_df['direction'] = np.where(features_df['future_return'] > threshold, 1,  # Yukarı
-                                  np.where(features_df['future_return'] < -threshold, -1, 0))  # Aşağı, yoksa nötr
+        features_df['direction'] = np.where(features_df['future_return'] > threshold_up, 1,  # Yukarı
+                                  np.where(features_df['future_return'] < threshold_down, -1, 0))  # Aşağı, yoksa nötr
         
-        # Binary classification (yukarı/aşağı) - volatilite bazlı
-        features_df['direction_binary'] = np.where(features_df['future_return'] > threshold, 1, 0)
+        # Binary classification (yukarı/aşağı) - GELİŞTİRİLMİŞ LOKİĞE:
+        # 1 (Yukarı): Pozitif ve anlamlı yükseliş
+        # 0 (Aşağı): Negatif ve anlamlı düşüş + küçük pozitif hareketler (nötr kabul etme)
+        features_df['direction_binary'] = np.where(features_df['future_return'] > threshold_up, 1, 
+                                   np.where(features_df['future_return'] < threshold_down, 0, 
+                                   np.where(features_df['future_return'] > 0, 1, 0)))  # Küçük pozitif hareketlerde YUKARI
         
         # Volatilite ayarlı hedef
         features_df['future_return_vol_adj'] = features_df['future_return'] / features_df['volatility_20d']

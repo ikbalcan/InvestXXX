@@ -484,63 +484,73 @@ def main():
     # Tekrarları kaldır ve sırala
     all_symbols = sorted(list(set(all_symbols)))
     
-    # Hisse seçimi - Gelişmiş seçenekler
+    # Session state'te seçili hisseyi sakla ve başlat
+    if 'current_selected_symbol' not in st.session_state:
+        st.session_state.current_selected_symbol = all_symbols[0] if all_symbols else None
+    
+    # Hisse seçimi - İyileştirilmiş arama
     st.sidebar.markdown("### 📊 Hisse Seçimi")
     
-    # Seçim yöntemi - Default olarak "Tüm Liste"
-    selection_method = st.sidebar.radio(
-        "Seçim Yöntemi:",
-        ["🔍 Kategoriye Göre", "📋 Tüm Liste", "✏️ Manuel Giriş"],
-        index=1,  # Default: Tüm Liste
-        help="Hisse seçimi için yöntem seçin"
+    # Arama terimi için metin girişi
+    search_term = st.sidebar.text_input(
+        "🔍 Hisse Ara:",
+        value="",
+        placeholder="örn: THYAO, MEGMT, AKBNK...",
+        help="Hisse kodunu yazın (örn: MEGMT) veya aşağıdan seçin"
     )
     
-    if selection_method == "🔍 Kategoriye Göre":
-        # Kategori seçimi
-        selected_category = st.sidebar.selectbox(
-            "Sektör Seçin:",
-            list(bist_stocks.keys()),
-            help="Hangi sektörden hisse seçmek istiyorsunuz?"
-        )
+    # Arama sonuçlarını filtrele
+    if search_term:
+        # Arama terimini temizle ve büyük harfe çevir
+        search_clean = search_term.upper().strip()
         
-        # Seçilen kategorideki hisseler
-        category_stocks = bist_stocks[selected_category]
-        selected_symbol = st.sidebar.selectbox(
-            f"{selected_category} Hisseleri:",
-            category_stocks,
-            help=f"{selected_category} sektöründeki hisseler"
-        )
+        # Sonuçları filtrele
+        filtered_symbols = [s for s in all_symbols if search_clean in s]
         
-    elif selection_method == "📋 Tüm Liste":
-        # Tüm hisseler listesi
-        selected_symbol = st.sidebar.selectbox(
-            "Tüm BIST Hisseleri:",
-            all_symbols,
-            help="BIST'teki tüm hisselerden seçim yapın"
-        )
-        
-    else:  # Manuel Giriş
-        # Manuel hisse girişi
-        st.sidebar.markdown("**✏️ Manuel Hisse Girişi**")
-        manual_symbol = st.sidebar.text_input(
-            "Hisse Kodu:",
-            placeholder="örn: GARAN.IS",
-            help="BIST hisse kodunu .IS uzantısı ile girin"
-        )
-        
-        if manual_symbol:
-            # Manuel girilen hisseyi kontrol et ve ekle
-            manual_symbol = manual_symbol.upper().strip()
-            if not manual_symbol.endswith('.IS'):
-                manual_symbol += '.IS'
+        # Eğer hiçbir sonuç bulunamazsa, kullanıcının girdiği değeri direkt kullan
+        if not filtered_symbols:
+            # Girdiğiniz değeri otomatik olarak .IS ile tamamla
+            if not search_clean.endswith('.IS'):
+                search_clean = search_clean + '.IS'
             
-            if manual_symbol not in all_symbols:
-                all_symbols.insert(0, manual_symbol)
-                st.sidebar.success(f"✅ {manual_symbol} eklendi!")
+            # Yeni hisseyi listeye ekle
+            if search_clean not in all_symbols:
+                filtered_symbols = [search_clean]
+                all_symbols.insert(0, search_clean)
+                st.sidebar.success(f"✅ {search_clean} eklendi!")
+        
+        # Bulunan sonuçları kullan
+        if filtered_symbols:
+            # Seçili hisseyi listede bul
+            current_index = 0
+            if st.session_state.current_selected_symbol in filtered_symbols:
+                current_index = filtered_symbols.index(st.session_state.current_selected_symbol)
             
-            selected_symbol = manual_symbol
+            selected_symbol = st.sidebar.selectbox(
+                "📋 Bulunan Hisseler:",
+                filtered_symbols,
+                index=current_index,
+                help="Aradığınız hisseyi seçin"
+            )
         else:
-            selected_symbol = all_symbols[0]  # Varsayılan
+            # Eğer hiç sonuç yoksa varsayılan hisse
+            selected_symbol = all_symbols[0]
+    else:
+        # Arama yapılmadıysa normal dropdown göster
+        # Seçili hisseyi listede bul
+        current_index = 0
+        if st.session_state.current_selected_symbol in all_symbols:
+            current_index = all_symbols.index(st.session_state.current_selected_symbol)
+        
+        selected_symbol = st.sidebar.selectbox(
+            "📋 Tüm BIST Hisseleri:",
+            all_symbols,
+            index=current_index,
+            help="Bir hisse seçin veya yukarıdaki arama kutusuna yazarak arayın"
+        )
+    
+    # Session state'i güncelle
+    st.session_state.current_selected_symbol = selected_symbol
     
     # Seçilen hisseyi session state'e kaydet
     if 'recent_searches' not in st.session_state:
@@ -558,42 +568,46 @@ def main():
                 st.session_state.recent_searches = st.session_state.recent_searches[:6]
         st.session_state.last_selected_symbol = selected_symbol
     
-    # Seçilen hisse bilgisi
-    st.sidebar.markdown(f"**🎯 Seçilen Hisse:** {selected_symbol}")
+    # Seçilen hisse bilgisi - Daha temiz görünüm
+    st.sidebar.markdown(f"""
+    <div style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); 
+                padding: 10px; 
+                border-radius: 8px; 
+                color: white; 
+                text-align: center; 
+                margin: 10px 0;">
+        <strong>🎯 Seçilen Hisse:</strong><br>
+        <span style="font-size: 1.2em;">{selected_symbol}</span>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Son aramalar - Popüler hisseler
+    # Son aramalar veya Popüler hisseler
+    st.sidebar.markdown("### 🚀 Hızlı Erişim")
+    
+    # Eğer son aramalar varsa onları göster, yoksa popüler hisseleri göster
     if st.session_state.recent_searches:
-        st.sidebar.markdown("### 🔄 Son Aramalar")
-        cols = st.sidebar.columns(2)
-        for i, stock in enumerate(st.session_state.recent_searches[:6]):  # En fazla 6 hisse göster
-            with cols[i % 2]:
-                if st.button(f"📈 {stock.replace('.IS', '')}", key=f"recent_{stock}_{i}"):
-                    # Son aramalar sırasını güncelle - En çok tıklananı başa al
-                    if stock in st.session_state.recent_searches:
-                        st.session_state.recent_searches.remove(stock)
-                    st.session_state.recent_searches.insert(0, stock)
-                    selected_symbol = stock
-                    st.session_state.last_selected_symbol = stock
-                    st.rerun()
+        display_stocks = st.session_state.recent_searches[:6]
+        section_title = "🔄 Son Aramalar"
     else:
-        # Eğer hiç arama yoksa, popüler hisseleri göster
-        st.sidebar.markdown("### ⚡ Popüler Hisseler")
-        popular_stocks = ['THYAO.IS', 'AKBNK.IS', 'BIMAS.IS', 'GARAN.IS', 'ASELS.IS']
-        
-        cols = st.sidebar.columns(2)
-        for i, stock in enumerate(popular_stocks):
-            with cols[i % 2]:
-                if st.button(f"📈 {stock.replace('.IS', '')}", key=f"popular_{stock}_{i}"):
-                    # Popüler hisseyi recent_searches'a ekle
-                    if stock not in st.session_state.recent_searches:
-                        st.session_state.recent_searches.insert(0, stock)
-                    else:
-                        # Zaten varsa başa al
-                        st.session_state.recent_searches.remove(stock)
-                        st.session_state.recent_searches.insert(0, stock)
-                    selected_symbol = stock
-                    st.session_state.last_selected_symbol = stock
-                    st.rerun()
+        display_stocks = ['THYAO.IS', 'AKBNK.IS', 'BIMAS.IS', 'GARAN.IS', 'ASELS.IS']
+        section_title = "⚡ Popüler Hisseler"
+    
+    # Butonları göster
+    cols = st.sidebar.columns(2)
+    for i, stock in enumerate(display_stocks):
+        with cols[i % 2]:
+            if st.button(f"{stock.replace('.IS', '')}", key=f"quick_{stock}_{i}", use_container_width=True):
+                # Son aramalar sırasını güncelle
+                if stock in st.session_state.recent_searches:
+                    st.session_state.recent_searches.remove(stock)
+                st.session_state.recent_searches.insert(0, stock)
+                if len(st.session_state.recent_searches) > 6:
+                    st.session_state.recent_searches = st.session_state.recent_searches[:6]
+                
+                # Session state'i güncelle
+                st.session_state.current_selected_symbol = stock
+                st.session_state.last_selected_symbol = stock
+                st.rerun()
     
     # Veri periyodu seçimi - Mobil uyumlu
     st.sidebar.markdown("### 📅 Veri Periyodu")
@@ -628,7 +642,7 @@ def main():
     
     with tab2:
         # 🔮 Tahmin Karar - Doğrudan gelecek tahmin içeriği
-        show_future_prediction_tab(selected_symbol, config)
+        show_future_prediction_tab(selected_symbol, config, interval=interval)
     
     with tab3:
         # 🎯 Hisse Avcısı - Toplu analiz ve karşılaştırma
