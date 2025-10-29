@@ -1,0 +1,9 @@
+{
+  "cash": 0,
+  "stocks": {
+    "FONET.IS": {
+      "quantity": 465000,
+      "avg_cost": 3.45
+    }
+  }
+}

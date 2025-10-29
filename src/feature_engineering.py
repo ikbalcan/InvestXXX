@@ -15,6 +15,14 @@ class FeatureEngineer:
     def __init__(self, config: Dict):
         self.config = config
         self.lookback_window = config.get('MODEL_CONFIG', {}).get('lookback_window', 30)
+        # Volatilite analizi bilgilerini sakla
+        self.volatility_info = {
+            'volatility': None,
+            'stock_type': None,
+            'volatility_scale': None,
+            'threshold_up': None,
+            'threshold_down': None
+        }
         
     def create_technical_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -147,16 +155,26 @@ class FeatureEngineer:
         """
         features_df = df.copy()
         
+        # Önce yatırım süresini kontrol et
+        investment_horizon = self.config.get('MODEL_CONFIG', {}).get('investment_horizon', 'MEDIUM_TERM')
+        horizon_configs = self.config.get('MODEL_CONFIG', {}).get('INVESTMENT_HORIZON_CONFIGS', {})
+        horizon_config = horizon_configs.get(investment_horizon, horizon_configs.get('MEDIUM_TERM', {}))
+        
+        # Yatırım süresine göre tahmin periyotunu belirle
+        prediction_days = horizon_config.get('prediction_days', 30)
+        
         # Interval'a göre prediction horizon belirle
         interval = self.config.get('MODEL_CONFIG', {}).get('interval', '1d')
         if interval == '1h':
-            prediction_horizon = 4  # 4 saat sonra
+            # Günlük veri için 1h interval'ında kaç periyot var
+            prediction_horizon = int(prediction_days * 24)  # Günlük veri = 24 saat
         elif interval == '4h':
-            prediction_horizon = 2  # 2 periyot sonra (8 saat)
+            prediction_horizon = int(prediction_days * 6)  # Günlük veri = 6 periyot
         elif interval == '1wk':
-            prediction_horizon = 1  # 1 hafta sonra
+            # Haftalık veri için
+            prediction_horizon = max(1, int(prediction_days / 7))  # Kaç hafta
         else:  # 1d
-            prediction_horizon = 1  # 1 gün sonra
+            prediction_horizon = int(prediction_days)  # Kaç gün
         
         # Config'den override varsa kullan
         prediction_horizon = self.config.get('MODEL_CONFIG', {}).get('prediction_horizon', prediction_horizon)
@@ -167,24 +185,104 @@ class FeatureEngineer:
         # Gelecek getiri
         features_df['future_return'] = (features_df['future_price'] / features_df['close']) - 1
         
-        # Volatilite hesapla
+        # Yatırım süresine göre base threshold'ları al
+        base_threshold_up = horizon_config.get('threshold_up', 0.02)
+        base_threshold_down = horizon_config.get('threshold_down', -0.02)
+        
+        # Volatiliteyi hesapla
         volatility = features_df['returns'].rolling(20).std().mean() * np.sqrt(252)
         
-        # Volatiliteye göre dinamik threshold belirle - Daha dengeli yaklaşım
-        if volatility <= 0.25:
-            threshold_up = 0.002   # %0.2+ hareket (Yukarı için)
-            threshold_down = -0.002  # %-0.2- hareket (Aşağı için)
-        elif volatility <= 0.40:
-            threshold_up = 0.003   # %0.3+ hareket
-            threshold_down = -0.003  # %-0.3- hareket
-        elif volatility <= 0.60:
-            threshold_up = 0.005   # %0.5+ hareket
-            threshold_down = -0.005  # %-0.5- hareket
-        else:
-            threshold_up = 0.008   # %0.8+ hareket
-            threshold_down = -0.008  # %-0.8- hareket
+        # ATR (Average True Range) hesapla - daha güvenilir volatilite ölçüsü
+        atr = features_df['atr'].rolling(20).mean() if 'atr' in features_df.columns else features_df['high'] - features_df['low']
+        atr_volatility = (atr / features_df['close']).mean() * np.sqrt(252)
         
-        logger.info(f"Volatilite: %{volatility*100:.1f}, Threshold Up: %{threshold_up*100:.1f}, Threshold Down: %{threshold_down*100:.1f}")
+        # Her iki volatilite metrikini birleştir
+        combined_volatility = (volatility + atr_volatility) / 2
+        
+        # AKILLI DINAMIK THRESHOLD AYARLAMA
+        # Yatırım süresine göre base threshold'ları kullan
+        # Ama her hissenin kendi volatilitesine göre ayarla
+        
+        # Yatırım süresine özel volatilite ayarlamaları
+        if investment_horizon == 'LONG_TERM':
+            # Uzun vade: Yumuşak threshold'lar, trend takibi
+            # Volatilite arttıkça threshold'ları sadece hafif artır
+            if combined_volatility <= 0.20:
+                volatility_scale = 0.6  # Küçük hareketleri yakala
+                stock_type = "Çok Stabil"
+            elif combined_volatility <= 0.35:
+                volatility_scale = 0.8  # Hafif yumuşak
+                stock_type = "Stabil"
+            elif combined_volatility <= 0.50:
+                volatility_scale = 1.0  # Normal
+                stock_type = "Orta"
+            elif combined_volatility <= 0.70:
+                volatility_scale = 1.2  # Orta-güçlü
+                stock_type = "Volatil"
+            else:
+                volatility_scale = 1.5  # Güçlü ama abartmasız
+                stock_type = "Çok Volatil"
+        
+        elif investment_horizon == 'SHORT_TERM':
+            # Kısa vade: Sıkı threshold'lar
+            if combined_volatility <= 0.20:
+                volatility_scale = 0.4
+                stock_type = "Çok Stabil"
+            elif combined_volatility <= 0.35:
+                volatility_scale = 0.6
+                stock_type = "Stabil"
+            elif combined_volatility <= 0.50:
+                volatility_scale = 1.0
+                stock_type = "Orta"
+            elif combined_volatility <= 0.70:
+                volatility_scale = 1.8
+                stock_type = "Volatil"
+            else:
+                volatility_scale = 2.5
+                stock_type = "Çok Volatil"
+        
+        else:  # MEDIUM_TERM
+            # Orta vade: Dengeli
+            if combined_volatility <= 0.20:
+                volatility_scale = 0.5
+                stock_type = "Çok Stabil"
+            elif combined_volatility <= 0.35:
+                volatility_scale = 0.7
+                stock_type = "Stabil"
+            elif combined_volatility <= 0.50:
+                volatility_scale = 1.0
+                stock_type = "Orta"
+            elif combined_volatility <= 0.70:
+                volatility_scale = 1.5
+                stock_type = "Volatil"
+            else:
+                volatility_scale = 2.0
+                stock_type = "Çok Volatil"
+        
+        # Threshold'ları uygula
+        threshold_up = base_threshold_up * volatility_scale
+        threshold_down = base_threshold_down * volatility_scale
+        
+        # Min/Max sınırları koy (çok küçük veya çok büyük threshold'ları önle)
+        min_threshold = 0.001  # En az %0.1 hareket
+        max_threshold = 0.20   # En fazla %20 hareket (çok agresif olmasın)
+        
+        threshold_up = max(min_threshold, min(max_threshold, threshold_up))
+        threshold_down = max(-max_threshold, min(-min_threshold, threshold_down))
+        
+        logger.info(f"Yatırım Süresi: {investment_horizon}, Horizon: {prediction_days} gün")
+        logger.info(f"Hisse Tipi: {stock_type}, Volatilite: %{combined_volatility*100:.1f}, Scale: {volatility_scale:.1f}")
+        logger.info(f"Threshold Up: %{threshold_up*100:.2f}, Threshold Down: %{threshold_down*100:.2f}")
+        
+        # Volatilite bilgilerini kaydet
+        self.volatility_info = {
+            'volatility': combined_volatility,
+            'stock_type': stock_type,
+            'volatility_scale': volatility_scale,
+            'threshold_up': threshold_up,
+            'threshold_down': threshold_down,
+            'investment_horizon': investment_horizon
+        }
         
         # Yön sınıflandırması (volatilite bazlı)
         features_df['direction'] = np.where(features_df['future_return'] > threshold_up, 1,  # Yukarı

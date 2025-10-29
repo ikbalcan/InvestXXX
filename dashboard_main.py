@@ -20,6 +20,7 @@ from dashboard_data_analysis import show_data_analysis_tab
 from dashboard_future_prediction import show_future_prediction_tab
 from dashboard_model_training import show_model_training_tab
 from dashboard_stock_hunter import show_stock_hunter_tab
+from dashboard_portfolio_manager import show_portfolio_manager_tab
 
 # Yardımcı modülleri import et
 from dashboard_utils import load_config, load_stock_data, analyze_stock_characteristics, get_auto_params
@@ -35,14 +36,6 @@ def main():
         layout="wide",  # Tam genişlik
         initial_sidebar_state="expanded"
     )
-    
-    # Başlık
-    st.markdown("""
-    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 15px; margin-bottom: 30px;">
-        <h1 style="margin: 0; font-size: 2.5em; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">📈 Hisse Senedi Yön Tahmini Sistemi</h1>
-        <p style="margin: 10px 0 0 0; font-size: 1.2em; opacity: 0.9;">AI Destekli Akıllı Yatırım Kararları</p>
-    </div>
-    """, unsafe_allow_html=True)
     
     # CSS stilleri - UI/UX İyileştirmeleri
     st.markdown("""
@@ -596,7 +589,7 @@ def main():
     cols = st.sidebar.columns(2)
     for i, stock in enumerate(display_stocks):
         with cols[i % 2]:
-            if st.button(f"{stock.replace('.IS', '')}", key=f"quick_{stock}_{i}", use_container_width=True):
+            if st.button(f"{stock.replace('.IS', '')}", key=f"quick_{stock}_{i}"):
                 # Son aramalar sırasını güncelle
                 if stock in st.session_state.recent_searches:
                     st.session_state.recent_searches.remove(stock)
@@ -608,6 +601,46 @@ def main():
                 st.session_state.current_selected_symbol = stock
                 st.session_state.last_selected_symbol = stock
                 st.rerun()
+    
+    # Yatırım süresi seçimi - YENİ! YENİ!
+    st.sidebar.markdown("### 🎯 Yatırım Süresi")
+    investment_horizon_options = {
+        "⚡ Kısa Vade (1 hafta - 1 ay)": "SHORT_TERM",
+        "📊 Orta Vade (1 ay - 3 ay)": "MEDIUM_TERM",
+        "🏆 Uzun Vade (3 ay - 1 yıl)": "LONG_TERM"
+    }
+    
+    investment_horizon_keys = list(investment_horizon_options.keys())
+    investment_horizon_values = list(investment_horizon_options.values())
+    
+    # Session state'te seçili yatırım süresini sakla
+    if 'selected_investment_horizon' not in st.session_state:
+        st.session_state.selected_investment_horizon = "MEDIUM_TERM"
+    
+    # Mevcut seçimi index'e çevir
+    current_index = investment_horizon_values.index(st.session_state.selected_investment_horizon) if st.session_state.selected_investment_horizon in investment_horizon_values else 1
+    
+    investment_horizon_display = st.sidebar.selectbox(
+        "Yatırım Stratejisi:",
+        investment_horizon_keys,
+        index=current_index,
+        help="Yatırım sürenize göre model eğitimi ve analiz yapılır"
+    )
+    
+    selected_investment_horizon = investment_horizon_options[investment_horizon_display]
+    st.session_state.selected_investment_horizon = selected_investment_horizon
+    
+    # Config'e yatırım süresini ekle
+    config['MODEL_CONFIG']['investment_horizon'] = selected_investment_horizon
+    
+    # Açıklama
+    horizon_descriptions = {
+        "SHORT_TERM": "📈 Küçük fiyat hareketlerine odaklanır, günlük işlemler için",
+        "MEDIUM_TERM": "⚖️ Dengeli yaklaşım, haftalık/aylık trendleri hedefler",
+        "LONG_TERM": "🎯 Büyük fiyat hareketlerini tahmin eder, uzun vadeli stratejiler için"
+    }
+    
+    st.sidebar.info(f"💡 {horizon_descriptions[selected_investment_horizon]}")
     
     # Veri periyodu seçimi - Mobil uyumlu
     st.sidebar.markdown("### 📅 Veri Periyodu")
@@ -627,13 +660,14 @@ def main():
         help="Teknik analiz için zaman dilimini seçin"
     )
     
-    # Tab sırasını kontrol et ve düzelt - 5 Ana Kategori
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    # Tab sırasını kontrol et ve düzelt - 6 Ana Kategori
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Veri Analizi", 
         "🔮 Tahmin Karar", 
         "🎯 Hisse Avcısı",
+        "🤖 Portföy Yöneticisi",
         "💼 Paper Trading",
-        "🤖 Model Eğitimi"
+        "🔧 Model Eğitimi"
     ])
     
     with tab1:
@@ -642,13 +676,17 @@ def main():
     
     with tab2:
         # 🔮 Tahmin Karar - Doğrudan gelecek tahmin içeriği
-        show_future_prediction_tab(selected_symbol, config, interval=interval)
+        show_future_prediction_tab(selected_symbol, config, interval=interval, investment_horizon=selected_investment_horizon)
     
     with tab3:
         # 🎯 Hisse Avcısı - Toplu analiz ve karşılaştırma
-        show_stock_hunter_tab(bist_stocks, all_symbols, config, interval=interval)
+        show_stock_hunter_tab(bist_stocks, all_symbols, config, interval=interval, investment_horizon=selected_investment_horizon)
     
     with tab4:
+        # 🤖 Robot Portföy Yöneticisi - Günlük yatırım kararları
+        show_portfolio_manager_tab(config, interval=interval, investment_horizon=selected_investment_horizon)
+    
+    with tab5:
         # 💼 Paper Trading & Portföy Yönetimi
         st.markdown('<h2 class="section-title">💼 Portföy Yönetimi & Paper Trading</h2>', unsafe_allow_html=True)
         
@@ -1024,7 +1062,7 @@ def main():
             st.info("💡 Bu özellik yakında aktif olacak!")
             st.error(f"Hata detayı: {str(e)}")
     
-    with tab5:
+    with tab6:
         # 🤖 Model Eğitimi - Sadece model eğitimi
         show_model_training_tab(all_symbols)
 

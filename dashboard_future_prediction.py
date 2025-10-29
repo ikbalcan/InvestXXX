@@ -402,7 +402,7 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
     
     return factors
 
-def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"):
+def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d", investment_horizon="MEDIUM_TERM"):
     """Tek hisse için model eğitimi"""
     try:
         if progress_callback:
@@ -418,11 +418,12 @@ def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"
         
         # Özellikler oluştur
         try:
-            # Interval'ı config'e ekle
+            # Interval ve investment_horizon'ı config'e ekle
             config_with_interval = config.copy()
             if 'MODEL_CONFIG' not in config_with_interval:
                 config_with_interval['MODEL_CONFIG'] = {}
             config_with_interval['MODEL_CONFIG']['interval'] = interval
+            config_with_interval['MODEL_CONFIG']['investment_horizon'] = investment_horizon
             
             engineer = FeatureEngineer(config_with_interval)
             features_df = engineer.create_all_features(data)
@@ -448,11 +449,11 @@ def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"
         if progress_callback:
             progress_callback(f"💾 {symbol} model kaydediliyor...")
         
-        # Modeli kaydet
+        # Modeli kaydet (yatırım süresini dahil et)
         from datetime import datetime
         symbol_name = symbol.replace('.IS', '')
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{symbol_name}_Model_{timestamp}.joblib"
+        filename = f"{symbol_name}_{investment_horizon}_Model_{timestamp}.joblib"
         
         model_path = predictor.save_model(filename)
         
@@ -555,13 +556,23 @@ def analyze_model_info(model_data, features_df):
     
     return model_info
 
-def show_future_prediction_tab(selected_symbol, config, interval="1d"):
+def show_future_prediction_tab(selected_symbol, config, interval="1d", investment_horizon="MEDIUM_TERM"):
     """Gelecek Tahmin Tab"""
     
-    st.header("🔮 Gelecek Tahmin")
-    st.info(f"🎯 Bu sekme hissenin **bir sonraki hamlesini** tahmin eder ve size net sinyal verir! (Zaman Dilimi: {interval})")
+    # Config'e yatırım süresini ekle
+    config['MODEL_CONFIG']['investment_horizon'] = investment_horizon
     
-    # Model seçimi - Otomatik hisse bazlı seçim
+    # Yatırım süresi bilgisi
+    horizon_names = {
+        "SHORT_TERM": "⚡ Kısa Vade (1 hafta - 1 ay)",
+        "MEDIUM_TERM": "📊 Orta Vade (1 ay - 3 ay)",
+        "LONG_TERM": "🏆 Uzun Vade (3 ay - 1 yıl)"
+    }
+    
+    st.header("🔮 Gelecek Tahmin")
+    st.info(f"🎯 Bu sekme hissenin **bir sonraki hamlesini** tahmin eder ve size net sinyal verir! (Strateji: {horizon_names.get(investment_horizon, investment_horizon)}, Zaman Dilimi: {interval})")
+    
+    # Model seçimi - Otomatik hisse bazlı seçim (yatırım süresine göre filtrelenmiş)
     model_files = []
     if os.path.exists('src/models'):
         model_files = [f for f in os.listdir('src/models') if f.endswith('.joblib')]
@@ -571,18 +582,68 @@ def show_future_prediction_tab(selected_symbol, config, interval="1d"):
     else:
         # Hisse bazlı model bul
         symbol_name = selected_symbol.replace('.IS', '') if selected_symbol else None
-        symbol_models = [f for f in model_files if symbol_name and symbol_name in f] if symbol_name else []
+        
+        # Önce yatırım süresine göre filtrele
+        filtered_models = [f for f in model_files if f'{investment_horizon}' in f]
+        
+        # Sonra hisse bazlı filtrele
+        symbol_models = []
+        if filtered_models:
+            symbol_models = [f for f in filtered_models if symbol_name and symbol_name in f] if symbol_name else []
+        
+        # Eğer yeni format yoksa eski format modelleri kontrol et
+        if not symbol_models and symbol_name:
+            # Eski format modelleri kullan (horizon içermeyen)
+            old_format_models = [f for f in model_files if symbol_name in f and all(h not in f for h in ['SHORT_TERM', 'MEDIUM_TERM', 'LONG_TERM'])]
+            if old_format_models:
+                symbol_models = old_format_models
+                st.warning(f"⚠️ **Eski formatta model bulundu. Doğru tahmin için {investment_horizon} stratejisi için yeni model eğitin!**")
+        
+        # Hala model yoksa
+        if not symbol_models:
+            st.warning(f"⚠️ {selected_symbol} için {investment_horizon} stratejisinde model bulunamadı!")
         
         if symbol_models:
             # En son modeli otomatik seç
             symbol_models.sort(reverse=True)
             auto_selected_model = symbol_models[0]
             
-            st.success(f"✅ {selected_symbol} için uygun model bulundu: **{auto_selected_model}**")
+            # Model formatını kontrol et
+            is_old_format = investment_horizon not in auto_selected_model
+            
+            if is_old_format:
+                st.warning(f"⚠️ **ESKİ MODEL KULLANILIYOR**: {auto_selected_model}")
+                st.error(f"Bu model yatırım süresi bilgisi içermiyor. Seçtiğiniz '{investment_horizon}' stratejisi için doğru tahmin yapamayabilir.")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🔄 Doğru Model İçin Eğit", type="primary", key="train_correct_model"):
+                        with st.spinner("🔮 Model eğitiliyor..."):
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            call_count = [0]
+                            
+                            def update_progress(message):
+                                call_count[0] += 1
+                                status_text.text(message)
+                                progress_bar.progress(min(100, call_count[0] * 20))
+                            
+                            success, message = train_model_for_symbol(selected_symbol, config, update_progress, interval=interval, investment_horizon=investment_horizon)
+                            
+                            if success:
+                                st.success(f"✅ {message}")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {message}")
+                
+                with col2:
+                    st.info("💡 Doğru model için sağdaki butonu kullanın")
+            else:
+                st.success(f"✅ {selected_symbol} için {investment_horizon} stratejisinde uygun model bulundu: **{auto_selected_model}**")
             
             # Manuel model seçimi (isteğe bağlı)
             if st.checkbox("🔄 Manuel model seçimi", value=False, key="manual_model_selection"):
-                selected_model = st.selectbox("🔮 Tahmin Modeli:", model_files, index=0, key="prediction_model_selection")
+                selected_model = st.selectbox("🔮 Tahmin Modeli:", symbol_models, key="prediction_model_selection")
             else:
                 selected_model = auto_selected_model
         else:
@@ -609,7 +670,7 @@ def show_future_prediction_tab(selected_symbol, config, interval="1d"):
                             progress_bar.progress(progress)
                         
                         # Model eğit
-                        success, message = train_model_for_symbol(selected_symbol, config, update_progress, interval=interval)
+                        success, message = train_model_for_symbol(selected_symbol, config, update_progress, interval=interval, investment_horizon=investment_horizon)
                         
                         if success:
                             st.success(f"✅ {message}")
@@ -624,13 +685,42 @@ def show_future_prediction_tab(selected_symbol, config, interval="1d"):
             st.markdown("---")
             st.info(f"ℹ️ Alternatif: Genel bir model kullanmak isterseniz aşağıdaki butonu kullanın")
             
-            # Genel model seçeneği
-            model_files.sort(reverse=True)
-            if st.checkbox("🔄 Genel model kullan", value=False, key="use_general_model"):
-                selected_model = st.selectbox("🔮 Genel Model:", model_files, index=0, key="general_model_selection")
-                st.info(f"ℹ️ Genel model kullanılacak: **{selected_model}**")
-            else:
-                selected_model = None  # Model seçilmedi
+            # Model eğitimi - Doğru yatırım süresinde
+            st.warning(f"⚠️ {selected_symbol} için {investment_horizon} stratejisinde model bulunamadı!")
+            st.info(f"💡 **Yatırım süresini değiştirdiyseniz, yeni strateji için model eğitmeniz gerekir.**")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button(f"🤖 {investment_horizon} için Model Eğit", type="primary", key="train_horizon_model"):
+                    with st.spinner("🔮 Model eğitiliyor, lütfen bekleyin..."):
+                        # Progress bar
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        # Progress değişkeni
+                        call_count = [0]
+                        
+                        def update_progress(message):
+                            call_count[0] += 1
+                            status_text.text(message)
+                            progress = min(100, call_count[0] * 20)
+                            progress_bar.progress(progress)
+                        
+                        # Model eğit
+                        success, message = train_model_for_symbol(selected_symbol, config, update_progress, interval=interval, investment_horizon=investment_horizon)
+                        
+                        if success:
+                            st.success(f"✅ {message}")
+                            st.info("🔄 Sayfa yenileniyor...")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {message}")
+            
+            with col2:
+                st.info(f"📊 Seçili Strateji: {horizon_names.get(investment_horizon, investment_horizon)}")
+            
+            selected_model = None  # Model seçilmedi
         
         # Tahmin butonu
         if st.button("🔮 Gelecek Hamleyi Tahmin Et", type="primary", disabled=(selected_model is None)):
@@ -675,7 +765,7 @@ def show_future_prediction_tab(selected_symbol, config, interval="1d"):
                                     def update_status(message):
                                         status_text.text(message)
                                     
-                                    success, message = train_model_for_symbol(selected_symbol, config, update_status, interval=interval)
+                                    success, message = train_model_for_symbol(selected_symbol, config, update_status, interval=interval, investment_horizon=investment_horizon)
                                     
                                     if success:
                                         st.success(f"✅ {message}")

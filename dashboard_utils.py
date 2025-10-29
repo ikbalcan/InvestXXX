@@ -22,8 +22,15 @@ def load_config():
         return {}
 
 @st.cache_data(ttl=300)  # 5 dakika cache
-def load_stock_data(symbol, period="1y", interval="1d"):
-    """Hisse verisi yükler - API call ile cache'li"""
+def load_stock_data(symbol, period="1y", interval="1d", silent=False):
+    """Hisse verisi yükler - API call ile cache'li
+    
+    Args:
+        symbol: Hisse sembolü
+        period: Veri periyodu
+        interval: Zaman dilimi
+        silent: True ise sidebar mesajları gösterme (batch işlemler için)
+    """
     try:
         # Cache dosya yolu
         cache_dir = "data/raw"
@@ -37,18 +44,21 @@ def load_stock_data(symbol, period="1y", interval="1d"):
             if cache_age < 300:  # 5 dakikadan yeni
                 try:
                     data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
-                    st.sidebar.success(f"📦 Cache'den yüklendi: {symbol} ({interval})")
+                    if not silent:
+                        st.sidebar.success(f"📦 Cache'den yüklendi: {symbol} ({interval})")
                     return data
                 except:
                     pass
         
         # API'den veri çek
-        st.sidebar.info(f"🌐 API'den yükleniyor: {symbol} ({interval})")
+        if not silent:
+            st.sidebar.info(f"🌐 API'den yükleniyor: {symbol} ({interval})")
         ticker = yf.Ticker(symbol)
         data = ticker.history(period=period, interval=interval)
         
         if data.empty:
-            st.sidebar.error(f"❌ Veri bulunamadı: {symbol}")
+            if not silent:
+                st.sidebar.error(f"❌ Veri bulunamadı: {symbol}")
             return pd.DataFrame()
         
         # Kolon isimlerini standardize et
@@ -58,12 +68,14 @@ def load_stock_data(symbol, period="1y", interval="1d"):
         
         # Cache'e kaydet
         data.to_csv(cache_file)
-        st.sidebar.success(f"✅ Veri yüklendi ve cache'lendi: {symbol} ({interval})")
+        if not silent:
+            st.sidebar.success(f"✅ Veri yüklendi ve cache'lendi: {symbol} ({interval})")
         
         return data
         
     except Exception as e:
-        st.sidebar.error(f"❌ Veri yükleme hatası {symbol}: {str(e)}")
+        if not silent:
+            st.sidebar.error(f"❌ Veri yükleme hatası {symbol}: {str(e)}")
         return pd.DataFrame()
 
 def analyze_stock_characteristics(symbol, period="2y"):

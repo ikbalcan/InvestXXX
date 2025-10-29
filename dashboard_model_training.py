@@ -23,7 +23,50 @@ from dashboard_utils import load_config, analyze_stock_characteristics, get_auto
 def show_model_training_tab(all_symbols):
     """Model Eğitimi Tab"""
     
-    st.header("🎯 Akıllı Model Eğitimi")
+    # Başlık ve yönetim butonları
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        st.header("🎯 Akıllı Model Eğitimi")
+    
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)  # Dikey hizalama için boşluk
+        
+        # Model yönetimi bölümü
+        with st.expander("🗂️ Model Yönetimi", expanded=False):
+            # Mevcut model sayısını göster
+            model_count = 0
+            if os.path.exists('src/models'):
+                model_files = [f for f in os.listdir('src/models') if f.endswith('.joblib')]
+                model_count = len(model_files)
+            
+            st.write(f"📊 **Mevcut Model Sayısı:** {model_count}")
+            
+            # Tüm modelleri sil butonu
+            if model_count > 0:
+                st.warning("⚠️ Bu işlem geri alınamaz!")
+                if st.button("🗑️ Tüm Modelleri Sil", type="secondary", use_container_width=True):
+                    try:
+                        deleted_count = 0
+                        if os.path.exists('src/models'):
+                            model_files = [f for f in os.listdir('src/models') if f.endswith('.joblib')]
+                            for model_file in model_files:
+                                try:
+                                    os.remove(os.path.join('src/models', model_file))
+                                    deleted_count += 1
+                                except Exception as e:
+                                    st.error(f"❌ {model_file} silinemedi: {str(e)}")
+                        
+                        if deleted_count > 0:
+                            st.success(f"✅ {deleted_count} model başarıyla silindi!")
+                            st.info("💡 Yeni modelleri eğitmek için eğitim butonunu kullanın.")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ Silinecek model bulunamadı!")
+                    except Exception as e:
+                        st.error(f"❌ Silme işlemi başarısız: {str(e)}")
+            else:
+                st.info("📝 Henüz eğitilmiş model bulunmuyor.")
     
     # Hisse seçimi ve analiz
     stock_options = all_symbols  # Ana dropdown'daki tüm hisseleri kullan
@@ -305,7 +348,7 @@ Güven Eşiği: {recommendations['confidence_threshold']:.2f}
                             title="Top 10 Feature Importance"
                         )
                         fig.update_layout(height=500)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
                     else:
                         st.warning("⚠️ Feature importance verisi boş!")
                         
@@ -331,7 +374,7 @@ Güven Eşiği: {recommendations['confidence_threshold']:.2f}
                                 title="Top 10 Feature Importance (Direct)"
                             )
                             fig.update_layout(height=500)
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
                         else:
                             st.error("❌ Model'de feature importance bulunamadı!")
                 else:

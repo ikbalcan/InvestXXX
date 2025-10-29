@@ -26,20 +26,29 @@ from price_target_predictor import PriceTargetPredictor
 from dashboard_utils import load_config, load_stock_data
 
 @st.cache_data(ttl=300)  # 5 dakika cache
-def load_stock_data_cached(symbol, period="1y", interval="1d"):
-    """Hisse verilerini cache'li olarak yükle"""
+def load_stock_data_cached(symbol, period="1y", interval="1d", silent=False):
+    """Hisse verilerini cache'li olarak yükle
+    
+    Args:
+        silent: True ise sidebar mesajları gösterme
+    """
     try:
-        return load_stock_data(symbol, period, interval=interval)
+        return load_stock_data(symbol, period, interval=interval, silent=silent)
     except Exception as e:
-        st.error(f"❌ {symbol} verisi yüklenemedi: {str(e)}")
+        if not silent:
+            st.error(f"❌ {symbol} verisi yüklenemedi: {str(e)}")
         return pd.DataFrame()
 
 
-def analyze_single_stock(symbol, config, period="1y", interval="1d"):
-    """Tek hisse analizi - Thread-safe"""
+def analyze_single_stock(symbol, config, period="1y", interval="1d", silent=False):
+    """Tek hisse analizi - Thread-safe
+    
+    Args:
+        silent: True ise veri yükleme mesajları gösterilmez (batch işlemler için)
+    """
     try:
         # Veri yükle
-        data = load_stock_data_cached(symbol, period, interval=interval)
+        data = load_stock_data_cached(symbol, period, interval=interval, silent=silent)
         if data.empty:
             return None
         
@@ -198,7 +207,7 @@ def analyze_single_stock(symbol, config, period="1y", interval="1d"):
         st.error(f"❌ {symbol} analizi başarısız: {str(e)}")
         return None
 
-def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"):
+def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d", investment_horizon="MEDIUM_TERM"):
     """Tek hisse için model eğitimi"""
     try:
         if progress_callback:
@@ -214,11 +223,12 @@ def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"
         
         # Özellikler oluştur
         try:
-            # Interval'ı config'e ekle
+            # Interval ve investment_horizon'ı config'e ekle
             config_with_interval = config.copy()
             if 'MODEL_CONFIG' not in config_with_interval:
                 config_with_interval['MODEL_CONFIG'] = {}
             config_with_interval['MODEL_CONFIG']['interval'] = interval
+            config_with_interval['MODEL_CONFIG']['investment_horizon'] = investment_horizon
             
             engineer = FeatureEngineer(config_with_interval)
             features_df = engineer.create_all_features(data)
@@ -244,10 +254,10 @@ def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"
         if progress_callback:
             progress_callback(f"💾 {symbol} model kaydediliyor...")
         
-        # Modeli kaydet
+        # Modeli kaydet (yatırım süresini dahil et)
         symbol_name = symbol.replace('.IS', '')
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{symbol_name}_Model_{timestamp}.joblib"
+        filename = f"{symbol_name}_{investment_horizon}_Model_{timestamp}.joblib"
         
         model_path = predictor.save_model(filename)
         
@@ -259,7 +269,7 @@ def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"
     except Exception as e:
         return False, f"{symbol} model eğitimi başarısız: {str(e)}"
 
-def train_models_batch(symbols, config, progress_container, interval="1d"):
+def train_models_batch(symbols, config, progress_container, interval="1d", investment_horizon="MEDIUM_TERM"):
     """Toplu model eğitimi - Progress bar ile"""
     results = []
     total_symbols = len(symbols)
@@ -274,7 +284,7 @@ def train_models_batch(symbols, config, progress_container, interval="1d"):
         progress_bar.progress(progress)
         
         # Model eğit
-        success, message = train_model_for_symbol(symbol, config, status_text.text, interval)
+        success, message = train_model_for_symbol(symbol, config, status_text.text, interval, investment_horizon)
         results.append({
             'symbol': symbol,
             'success': success,
@@ -473,11 +483,21 @@ def create_stock_comparison_chart(results_df):
     )
     return fig
 
-def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d"):
+def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d", investment_horizon="MEDIUM_TERM"):
     """Hisse Avcısı Tab"""
     
+    # Config'e yatırım süresini ekle
+    config['MODEL_CONFIG']['investment_horizon'] = investment_horizon
+    
+    # Yatırım süresi bilgisi
+    horizon_names = {
+        "SHORT_TERM": "⚡ Kısa Vade",
+        "MEDIUM_TERM": "📊 Orta Vade",
+        "LONG_TERM": "🏆 Uzun Vade"
+    }
+    
     st.markdown('<h2 class="section-title">🎯 Hisse Avcısı - BIST Avı</h2>', unsafe_allow_html=True)
-    st.info(f"⏰ **Zaman Dilimi:** {interval}")
+    st.info(f"🎯 **Yatırım Stratejisi:** {horizon_names.get(investment_horizon, investment_horizon)} | ⏰ **Zaman Dilimi:** {interval}")
     
     st.info("""
     🔍 **Hisse Avcısı Nedir?**
@@ -638,7 +658,7 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d"):
                     progress_container = st.container()
                     
                     # Model eğitimi başlat
-                    training_results = train_models_batch(symbols_to_train, config, progress_container, interval)
+                    training_results = train_models_batch(symbols_to_train, config, progress_container, interval, investment_horizon)
                     
                     # Sonuçları göster
                     successful_trainings = [r for r in training_results if r['success']]
@@ -843,7 +863,6 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d"):
                     
                     st.dataframe(
                         display_df[table_columns],
-                        use_container_width=True,
                         column_config={
                             "symbol": "Hisse",
                             "Fiyat": st.column_config.NumberColumn("Fiyat (TL)", format="%.2f"),
@@ -861,7 +880,7 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d"):
                     # Grafik analizi
                     st.markdown("### 📊 Karşılaştırma Grafikleri")
                     comparison_chart = create_stock_comparison_chart(filtered_df if len(filtered_df) > 0 else results_df)
-                    st.plotly_chart(comparison_chart, use_container_width=True)
+                    st.plotly_chart(comparison_chart, use_container_width=True, config={'displayModeBar': True})
                 
                 # Detaylı analiz
                 st.markdown("### 🔍 Detaylı Analiz")
@@ -913,8 +932,8 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d"):
                 if sector_counts:
                     sector_df = pd.DataFrame(list(sector_counts.items()), columns=['Sektör', 'Hisse Sayısı'])
                     fig = px.pie(sector_df, values='Hisse Sayısı', names='Sektör', 
-                               title="Analiz Edilen Hisselerin Sektörel Dağılımı")
-                    st.plotly_chart(fig, use_container_width=True)
+                              title="Analiz Edilen Hisselerin Sektörel Dağılımı")
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
                 
                 # Risk analizi
                 st.markdown("### ⚠️ Risk Analizi")

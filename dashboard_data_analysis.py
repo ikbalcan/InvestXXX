@@ -89,12 +89,12 @@ def show_data_analysis_tab(selected_symbol, period="2y", interval="1d"):
     # Grafikler
     st.subheader("📈 Fiyat Grafiği")
     fig_price = plot_price_chart(data, f"{selected_symbol} Fiyat Grafiği")
-    st.plotly_chart(fig_price, use_container_width=True)
+    st.plotly_chart(fig_price, use_container_width=True, config={'displayModeBar': True})
     
     # Hacim grafiği
     st.subheader("📊 Hacim Analizi")
     fig_volume = plot_volume_chart(data)
-    st.plotly_chart(fig_volume, use_container_width=True)
+    st.plotly_chart(fig_volume, use_container_width=True, config={'displayModeBar': True})
     
     # Teknik indikatörler
     st.subheader("🔧 Teknik İndikatörler")
@@ -104,7 +104,7 @@ def show_data_analysis_tab(selected_symbol, period="2y", interval="1d"):
     
     if not features_df.empty:
         fig_technical = plot_technical_indicators(features_df)
-        st.plotly_chart(fig_technical, use_container_width=True)
+        st.plotly_chart(fig_technical, use_container_width=True, config={'displayModeBar': True})
         
         # Teknik indikatör açıklamaları - Collapsible
         st.markdown("---")
@@ -347,8 +347,8 @@ def show_data_analysis_tab(selected_symbol, period="2y", interval="1d"):
     
     # Veri tablosu
     st.subheader("📋 Ham Veri")
-    st.dataframe(data.tail(20), use_container_width=True)
+    st.dataframe(data.tail(20), width='stretch')
     
     # İstatistikler
     st.subheader("📊 İstatistikler")
-    st.dataframe(data.describe(), use_container_width=True)
+    st.dataframe(data.describe(), width='stretch')
