@@ -21,10 +21,14 @@ from dashboard_future_prediction import show_future_prediction_tab
 from dashboard_model_training import show_model_training_tab
 from dashboard_stock_hunter import show_stock_hunter_tab
 from dashboard_portfolio_manager import show_portfolio_manager_tab
+from dashboard_fundamental_analysis import show_fundamental_analysis_tab
+from dashboard_guide import show_guide_tab
+from dashboard_speculative_opportunities import show_speculative_opportunities_tab
 
 # Yardımcı modülleri import et
 from dashboard_utils import load_config, load_stock_data, analyze_stock_characteristics, get_auto_params
 from dashboard_charts import plot_price_chart, plot_volume_chart, plot_technical_indicators
+from src.bist_symbols_loader import get_extended_bist_symbols, add_user_symbol
 
 def main():
     """Ana dashboard"""
@@ -469,13 +473,17 @@ def main():
         ]
     }
     
-    # Tüm hisseleri tek listede topla
-    all_symbols = []
+    # Tüm hisseleri tek listede topla (önce mevcut kategori bazlı)
+    all_symbols_from_categories = []
     for category, stocks in bist_stocks.items():
-        all_symbols.extend(stocks)
+        all_symbols_from_categories.extend(stocks)
+    all_symbols_from_categories = sorted(list(set(all_symbols_from_categories)))
     
-    # Tekrarları kaldır ve sırala
-    all_symbols = sorted(list(set(all_symbols)))
+    # BIST'teki TÜM hisseleri yükle (genişletilmiş liste)
+    all_bist_symbols = get_extended_bist_symbols()
+    
+    # Kategori bazlı ve genişletilmiş listeyi birleştir
+    all_symbols = sorted(list(set(all_symbols_from_categories + all_bist_symbols)))
     
     # Session state'te seçili hisseyi sakla ve başlat
     if 'current_selected_symbol' not in st.session_state:
@@ -506,11 +514,13 @@ def main():
             if not search_clean.endswith('.IS'):
                 search_clean = search_clean + '.IS'
             
-            # Yeni hisseyi listeye ekle
+            # Yeni hisseyi listeye ekle ve kalıcı olarak kaydet
             if search_clean not in all_symbols:
                 filtered_symbols = [search_clean]
                 all_symbols.insert(0, search_clean)
-                st.sidebar.success(f"✅ {search_clean} eklendi!")
+                # Kalıcı olarak kaydet
+                add_user_symbol(search_clean)
+                st.sidebar.success(f"✅ {search_clean} eklendi ve kaydedildi!")
         
         # Bulunan sonuçları kullan
         if filtered_symbols:
@@ -660,13 +670,15 @@ def main():
         help="Teknik analiz için zaman dilimini seçin"
     )
     
-    # Tab sırasını kontrol et ve düzelt - 6 Ana Kategori
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Veri Analizi", 
-        "🔮 Tahmin Karar", 
+    # Sekmeler - ilişkilere göre yeniden düzenlendi
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "📊 Veri Analizi",
+        "📑 Temel Analiz",
+        "🔮 Tahmin Karar",
         "🎯 Hisse Avcısı",
+        "🚀 Dar Tahta Fırsatlar",
         "🤖 Portföy Yöneticisi",
-        "💼 Paper Trading",
+        "📘 Rehber",
         "🔧 Model Eğitimi"
     ])
     
@@ -675,395 +687,31 @@ def main():
         show_data_analysis_tab(selected_symbol, period, interval)
     
     with tab2:
+        # 📑 Temel Analiz - Finansal tablolar ve oranlar
+        show_fundamental_analysis_tab(selected_symbol)
+    
+    with tab3:
         # 🔮 Tahmin Karar - Doğrudan gelecek tahmin içeriği
         show_future_prediction_tab(selected_symbol, config, interval=interval, investment_horizon=selected_investment_horizon)
     
-    with tab3:
+    with tab4:
         # 🎯 Hisse Avcısı - Toplu analiz ve karşılaştırma
         show_stock_hunter_tab(bist_stocks, all_symbols, config, interval=interval, investment_horizon=selected_investment_horizon)
     
-    with tab4:
+    with tab5:
+        # 🚀 Dar Tahta Fırsatlar - Dar tahtalı ve aşırı yükselme potansiyeli olan hisseler
+        show_speculative_opportunities_tab(bist_stocks, all_symbols, config, interval=interval, investment_horizon=selected_investment_horizon)
+    
+    with tab6:
         # 🤖 Robot Portföy Yöneticisi - Günlük yatırım kararları
         show_portfolio_manager_tab(config, interval=interval, investment_horizon=selected_investment_horizon)
     
-    with tab5:
-        # 💼 Paper Trading & Portföy Yönetimi
-        st.markdown('<h2 class="section-title">💼 Portföy Yönetimi & Paper Trading</h2>', unsafe_allow_html=True)
-        
-        # Paper Trading açıklaması
-        st.info("📚 **Paper Trading Nedir?**")
-        st.write("**Paper Trading**, gerçek para kullanmadan sanal bir portföy ile hisse senedi işlemleri yapmanızı sağlayan bir simülasyon sistemidir.")
-        
-        st.subheader("🎯 Nasıl Çalışır?")
-        st.write("""
-        - **📝 Manuel Ekleme:** Mevcut hisselerinizi sisteme ekleyerek portföyünüzü oluşturun
-        - **🤖 AI Destekli İşlem:** Makine öğrenmesi modeli ile gelecek tahminleri yapın
-        - **📊 Performans Takibi:** Kar/zarar analizi ve risk metrikleri ile performansınızı izleyin
-        - **💰 Sanal Sermaye:** Gerçek para riski olmadan stratejilerinizi test edin
-        """)
-        
-        st.subheader("✅ Faydaları:")
-        st.write("""
-        - Gerçek para kaybetme riski olmadan deneyim kazanın
-        - AI tahminlerinin doğruluğunu test edin
-        - Farklı stratejileri deneyin
-        - Risk yönetimi becerilerinizi geliştirin
-        """)
-        
-        # Paper trader durumu
-        try:
-            from live_trade import PaperTrader
-            
-            # Session state ile paper trader'ı sakla
-            if 'paper_trader' not in st.session_state:
-                st.session_state.paper_trader = PaperTrader(config)
-            
-            paper_trader = st.session_state.paper_trader
-            
-            # Her seferinde localStorage'dan güncel veriyi yükle
-            paper_trader.initial_capital = paper_trader.load_initial_capital()
-            paper_trader.current_capital = paper_trader.load_current_capital()
-            paper_trader.positions = paper_trader.load_positions()
-            paper_trader.trade_history = paper_trader.load_trade_history()
-            
-            summary = paper_trader.get_portfolio_summary()
-            
-            # Portföy özeti - Streamlit metrikleri
-            st.subheader("📊 Portföy Özeti")
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Mevcut Sermaye", f"{summary['current_capital']:,.0f} TL")
-            
-            with col2:
-                st.metric("Toplam Değer", f"{summary['total_value']:,.0f} TL")
-            
-            with col3:
-                delta_color = "normal" if summary['total_return'] > 0 else "inverse"
-                st.metric("Toplam Getiri", f"{summary['total_return']:+.2%}", delta=f"{summary['total_return']:+.2%}")
-            
-            with col4:
-                st.metric("Aktif Pozisyonlar", f"{summary['positions']}")
-            
-            # İstatistikler
-            st.subheader("📈 İstatistikler")
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                total_trades = summary.get('total_trades', 0)
-                st.metric("Toplam İşlem", str(total_trades))
-            
-            with col2:
-                today_trades = summary.get('today_trades', 0)
-                st.metric("Bugünkü İşlem", str(today_trades))
-            
-            with col3:
-                win_rate = summary.get('win_rate', 0.0)
-                st.metric("Kazanma Oranı", f"{win_rate:.1%}")
-            
-            with col4:
-                profitable = summary.get('profitable_trades', 0)
-                losing = summary.get('losing_trades', 0)
-                st.metric("Kazanç/Kayıp", f"{profitable}/{losing}")
-            
-            # Portföy yönetimi bölümleri
-            st.markdown('<h3 class="subsection-title">🎛️ Portföy Yönetimi</h3>', unsafe_allow_html=True)
-            
-            # Alt sekmeler
-            portfolio_tab1, portfolio_tab2, portfolio_tab3 = st.tabs([
-                "📝 Hisse Ekleme", 
-                "📊 Mevcut Pozisyonlar", 
-                "⚙️ Ayarlar"
-            ])
-            
-            with portfolio_tab1:
-                st.markdown('<h4 class="subsection-title">📝 Yeni Hisse Ekleme</h4>', unsafe_allow_html=True)
-                
-                # Hisse ekleme formu
-                with st.form("add_stock_form"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        stock_symbol = st.selectbox(
-                            "Hisse Senedi:", 
-                            all_symbols,
-                            help="Eklemek istediğiniz hisse senedini seçin"
-                        )
-                        
-                        entry_price = st.number_input(
-                            "Giriş Fiyatı (TL):", 
-                            min_value=0.01, 
-                            value=100.0,
-                            help="Hisseyi hangi fiyattan aldığınızı girin"
-                        )
-                    
-                    with col2:
-                        quantity = st.number_input(
-                            "Miktar (Lot):", 
-                            min_value=1, 
-                            value=100,
-                            help="Kaç lot aldığınızı girin"
-                        )
-                        
-                        entry_date = st.date_input(
-                            "Alım Tarihi:",
-                            value=datetime.now().date(),
-                            help="Hisseyi hangi tarihte aldığınızı seçin"
-                        )
-                    
-                    # Form gönderimi
-                    submitted = st.form_submit_button("💼 Hisse Ekle", type="primary")
-                    
-                    if submitted:
-                        # Manuel pozisyon ekleme
-                        total_value = quantity * entry_price
-                        
-                        if total_value <= summary['current_capital']:
-                            # Pozisyonu ekle
-                            paper_trader.positions[stock_symbol] = {
-                                'quantity': quantity,
-                                'entry_price': entry_price,
-                                'entry_date': datetime.combine(entry_date, datetime.min.time()),
-                                'confidence': 0.8  # Manuel ekleme için varsayılan güven
-                            }
-                            
-                            # Sermayeyi güncelle
-                            paper_trader.current_capital -= total_value
-                            
-                            # İşlemi kaydet
-                            trade = {
-                                'date': datetime.now(),
-                                'symbol': stock_symbol,
-                                'action': 'BUY',
-                                'price': entry_price,
-                                'quantity': quantity,
-                                'position_size': total_value,
-                                'confidence': 0.8,
-                                'capital_after': paper_trader.current_capital,
-                                'manual_entry': True
-                            }
-                            
-                            paper_trader.trade_history.append(trade)
-                            paper_trader.save_to_localStorage()
-                            
-                            # Session state'i güncelle
-                            st.session_state.paper_trader = paper_trader
-                            
-                            st.success(f"✅ {stock_symbol} hissesi başarıyla eklendi!")
-                            st.success(f"💰 Toplam değer: {total_value:,.0f} TL")
-                            st.success("🔄 Sayfa yenileniyor...")
-                            
-                            # Sayfa yenileme yerine veriyi güncelle
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Yetersiz sermaye! Mevcut: {summary['current_capital']:,.0f} TL, Gerekli: {total_value:,.0f} TL")
-            
-            with portfolio_tab2:
-                st.markdown('<h4 class="subsection-title">📊 Mevcut Pozisyonlar</h4>', unsafe_allow_html=True)
-                
-                if summary['positions'] > 0:
-                    for symbol, details in summary['position_details'].items():
-                        # Pozisyon bilgilerini Streamlit ile göster
-                        col1, col2, col3 = st.columns([2, 1, 1])
-                        
-                        with col1:
-                            st.subheader(f"📊 {symbol}")
-                            st.write(f"**Miktar:** {details['quantity']:.0f} lot")
-                            st.write(f"**Giriş Fiyatı:** {details['entry_price']:.2f} TL")
-                            st.write(f"**Güncel Fiyat:** {details['current_price']:.2f} TL")
-                        
-                        with col2:
-                            st.metric("Güncel Değer", f"{details['current_value']:,.0f} TL")
-                            st.metric("Tutma Süresi", f"{details['days_held']} gün")
-                        
-                        with col3:
-                            # Getiri gösterimi
-                            if details['unrealized_return'] > 0:
-                                st.metric("Getiri", f"{details['unrealized_return']:+.2%}", delta="📈")
-                            else:
-                                st.metric("Getiri", f"{details['unrealized_return']:+.2%}", delta="📉")
-                        
-                        st.divider()
-                        
-                        # Pozisyon işlemleri
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            if st.button(f"📈 {symbol} Sat", key=f"sell_{symbol}"):
-                                st.session_state[f"show_sell_{symbol}"] = True
-                        
-                        with col2:
-                            if st.button(f"📊 {symbol} Detay", key=f"detail_{symbol}"):
-                                st.session_state[f"show_detail_{symbol}"] = True
-                        
-                        with col3:
-                            if st.button(f"❌ {symbol} Sil", key=f"delete_{symbol}"):
-                                st.session_state[f"show_delete_{symbol}"] = True
-                        
-                        # Satış formu
-                        if st.session_state.get(f"show_sell_{symbol}", False):
-                            st.write("---")
-                            st.subheader(f"📈 {symbol} Satış İşlemi")
-                            sell_price = st.number_input(
-                                f"{symbol} Satış Fiyatı:", 
-                                min_value=0.01, 
-                                value=details['current_price'],
-                                key=f"sell_price_{symbol}"
-                            )
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                if st.button(f"✅ Satışı Onayla", key=f"confirm_sell_{symbol}"):
-                                    success = paper_trader.close_position(symbol, sell_price, "Manuel Satış")
-                                    if success:
-                                        st.success(f"✅ {symbol} satışı tamamlandı!")
-                                        st.session_state[f"show_sell_{symbol}"] = False
-                                        st.rerun()
-                                    else:
-                                        st.error(f"❌ Satış işlemi başarısız!")
-                            
-                            with col2:
-                                if st.button("❌ İptal", key=f"cancel_sell_{symbol}"):
-                                    st.session_state[f"show_sell_{symbol}"] = False
-                                    st.rerun()
-                        
-                        # Detay gösterimi
-                        if st.session_state.get(f"show_detail_{symbol}", False):
-                            st.write("---")
-                            st.subheader(f"📊 {symbol} Pozisyon Detayları")
-                            st.write(f"**Miktar:** {details['quantity']:.0f} lot")
-                            st.write(f"**Giriş Fiyatı:** {details['entry_price']:.2f} TL")
-                            st.write(f"**Güncel Fiyat:** {details['current_price']:.2f} TL")
-                            st.write(f"**Güncel Değer:** {details['current_value']:,.0f} TL")
-                            st.write(f"**Gerçekleşmemiş Getiri:** {details['unrealized_return']:+.2%}")
-                            st.write(f"**Tutma Süresi:** {details['days_held']} gün")
-                            st.write(f"**Güven Skoru:** {details['confidence']:.2f}")
-                            
-                            if st.button("❌ Kapat", key=f"close_detail_{symbol}"):
-                                st.session_state[f"show_detail_{symbol}"] = False
-                                st.rerun()
-                        
-                        # Silme onayı
-                        if st.session_state.get(f"show_delete_{symbol}", False):
-                            st.write("---")
-                            st.warning(f"⚠️ {symbol} pozisyonunu silmek istediğinizden emin misiniz?")
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                if st.button(f"✅ Evet, Sil", key=f"confirm_delete_{symbol}"):
-                                    del paper_trader.positions[symbol]
-                                    paper_trader.save_to_localStorage()
-                                    st.session_state.paper_trader = paper_trader
-                                    st.success(f"✅ {symbol} pozisyonu silindi!")
-                                    st.session_state[f"show_delete_{symbol}"] = False
-                                    st.rerun()
-                            with col2:
-                                if st.button("❌ İptal", key=f"cancel_delete_{symbol}"):
-                                    st.session_state[f"show_delete_{symbol}"] = False
-                                    st.rerun()
-                        
-                        st.write("---")
-                    
-                    # Performans analizi
-                    st.subheader("📈 Portföy Performans Analizi")
-                    
-                    performance = summary['portfolio_performance']
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Toplam Kar/Zarar", f"{performance['total_profit_loss']:+.2%}")
-                    
-                    with col2:
-                        st.metric("Ortalama Getiri", f"{performance['avg_return_per_trade']:+.2%}")
-                    
-                    with col3:
-                        st.metric("En İyi İşlem", f"{performance['best_trade']:+.2%}")
-                    
-                    with col4:
-                        st.metric("En Kötü İşlem", f"{performance['worst_trade']:+.2%}")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.metric("Maksimum Düşüş", f"{performance['max_drawdown']:+.2%}")
-                    
-                    with col2:
-                        st.metric("Sharpe Oranı", f"{performance['sharpe_ratio']:.2f}")
-                    
-                else:
-                    st.info("📝 Henüz pozisyonunuz bulunmuyor. 'Hisse Ekleme' sekmesinden yeni pozisyonlar ekleyebilirsiniz.")
-            
-            with portfolio_tab3:
-                st.markdown('<h4 class="subsection-title">⚙️ Portföy Ayarları</h4>', unsafe_allow_html=True)
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("**🔄 Portföy Sıfırlama**")
-                    if st.button("🔄 Portföyü Sıfırla", type="secondary"):
-                        new_capital = st.number_input("Yeni Sermaye (TL):", min_value=1000, value=100000)
-                        if st.button("✅ Onayla", type="primary"):
-                            paper_trader.reset_portfolio(new_capital)
-                            st.success(f"✅ Portföy sıfırlandı! Yeni sermaye: {new_capital:,.0f} TL")
-                            st.rerun()
-                
-                with col2:
-                    st.markdown("**💾 Veri Yönetimi**")
-                    if st.button("💾 Durumu Kaydet", type="secondary"):
-                        paper_trader.save_to_localStorage()
-                        st.success("✅ Durum kaydedildi!")
-                    
-                    if st.button("📥 Durumu Yükle", type="secondary"):
-                        st.info("💡 Durum otomatik olarak yükleniyor...")
-            
-            # Risk yönetimi bilgileri
-            st.subheader("⚠️ Risk Yönetimi")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("Maksimum Pozisyon", f"{paper_trader.max_position_size:.1%}")
-            
-            with col2:
-                st.metric("Stop Loss", f"{paper_trader.stop_loss_pct:.1%}")
-            
-            with col3:
-                st.metric("Take Profit", f"{paper_trader.take_profit_pct:.1%}")
-            
-            # Son işlemler
-            if summary['recent_trades']:
-                st.subheader("📋 Son İşlemler")
-                
-                for trade in summary['recent_trades']:
-                    emoji = "🟢" if trade['action'] == 'BUY' else "🔴"
-                    manual_indicator = "👤" if trade.get('manual_entry', False) else "🤖"
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.write(f"{emoji} {manual_indicator}")
-                    
-                    with col2:
-                        st.write(f"{trade['date'].strftime('%H:%M')}")
-                    
-                    with col3:
-                        st.write(f"{trade['symbol']} - {trade['action']}")
-                    
-                    with col4:
-                        if 'return_pct' in trade:
-                            st.write(f"{trade['price']:.2f} TL ({trade['return_pct']:+.2%})")
-                        else:
-                            st.write(f"{trade['price']:.2f} TL")
-                    
-                    st.divider()
-                    
-        except Exception as e:
-            st.warning("⚠️ Paper Trading modülü henüz aktif değil.")
-            st.info("💡 Bu özellik yakında aktif olacak!")
-            st.error(f"Hata detayı: {str(e)}")
-    
-    with tab6:
-        # 🤖 Model Eğitimi - Sadece model eğitimi
+    with tab7:
+        # 📘 Rehber - Teknik ve Temel Analiz Bilgi Merkezi
+        show_guide_tab()
+
+    with tab8:
+        # 🔧 Model Eğitimi - Ayarlar niteliğinde
         show_model_training_tab(all_symbols)
 
 if __name__ == "__main__":

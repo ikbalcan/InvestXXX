@@ -1,9 +1,37 @@
 {
-  "cash": 0,
+  "cash": 200000,
   "stocks": {
+    "MGROS.IS": {
+      "quantity": 450,
+      "avg_cost": 454.5
+    },
+    "PETKM.IS": {
+      "quantity": 11956,
+      "avg_cost": 17.0
+    },
+    "ULKER.IS": {
+      "quantity": 2000,
+      "avg_cost": 106.1
+    },
+    "PGSUS.IS": {
+      "quantity": 459,
+      "avg_cost": 206.0
+    },
     "FONET.IS": {
-      "quantity": 465000,
-      "avg_cost": 3.45
+      "quantity": 27817,
+      "avg_cost": 3.3
+    },
+    "AKBNK.IS": {
+      "quantity": 1668,
+      "avg_cost": 59.55
+    },
+    "SAHOL.IS": {
+      "quantity": 1854,
+      "avg_cost": 80.0
+    },
+    "TKFEN.IS": {
+      "quantity": 1000,
+      "avg_cost": 84.2
     }
   }
 }

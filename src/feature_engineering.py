@@ -77,6 +77,18 @@ class FeatureEngineer:
         features_df['volume_ratio'] = features_df['volume'] / features_df['volume_sma_20']
         features_df['volume_spike'] = np.where(features_df['volume_ratio'] > 2, 1, 0)
         
+        # OBV (On-Balance Volume) - Hacim destekli göstergeler
+        obv = pd.Series(index=features_df.index, dtype=float)
+        obv.iloc[0] = features_df['volume'].iloc[0]
+        for i in range(1, len(features_df)):
+            if features_df['close'].iloc[i] > features_df['close'].iloc[i-1]:
+                obv.iloc[i] = obv.iloc[i-1] + features_df['volume'].iloc[i]
+            elif features_df['close'].iloc[i] < features_df['close'].iloc[i-1]:
+                obv.iloc[i] = obv.iloc[i-1] - features_df['volume'].iloc[i]
+            else:
+                obv.iloc[i] = obv.iloc[i-1]
+        features_df['obv'] = obv
+        
         # Price position features
         features_df['price_vs_sma20'] = features_df['close'] / features_df['sma_20'] - 1
         features_df['price_vs_sma50'] = features_df['close'] / features_df['sma_50'] - 1
