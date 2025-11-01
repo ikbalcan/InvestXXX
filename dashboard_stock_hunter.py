@@ -25,7 +25,7 @@ from model_train import StockDirectionPredictor
 from price_target_predictor import PriceTargetPredictor
 from dashboard_utils import load_config, load_stock_data
 
-@st.cache_data(ttl=300)  # 5 dakika cache
+@st.cache_data(ttl=3600)  # 1 saat cache - Optimizasyon: Daha uzun cache süresi
 def load_stock_data_cached(symbol, period="1y", interval="1d", silent=False):
     """Hisse verilerini cache'li olarak yükle
     
@@ -296,17 +296,28 @@ def train_models_batch(symbols, config, progress_container, interval="1d", inves
     
     return results
 
-def analyze_multiple_stocks(symbols, config, max_workers=5, interval="1d"):
-    """Çoklu hisse analizi - Paralel işlem"""
+def analyze_multiple_stocks(symbols, config, max_workers=None, interval="1d"):
+    """Çoklu hisse analizi - Paralel işlem - Optimizasyon: Worker sayısı azaltıldı"""
     results = []
+    
+    # Optimizasyon: Ücretsiz sunucular için worker sayısını azalt
+    if max_workers is None:
+        max_workers = min(3, len(symbols))  # Maksimum 3 worker (ücretsiz sunucular için)
+    
+    # Progress bar oluştur
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
     with st.spinner(f"🔍 {len(symbols)} hisse analiz ediliyor..."):
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Tüm hisseleri paralel olarak analiz et
             future_to_symbol = {
-                executor.submit(analyze_single_stock, symbol, config, "1y", interval): symbol 
+                executor.submit(analyze_single_stock, symbol, config, "1y", interval, silent=True): symbol 
                 for symbol in symbols
             }
+            
+            completed = 0
+            total = len(symbols)
             
             for future in concurrent.futures.as_completed(future_to_symbol):
                 symbol = future_to_symbol[future]
@@ -314,9 +325,17 @@ def analyze_multiple_stocks(symbols, config, max_workers=5, interval="1d"):
                     result = future.result()
                     if result is not None:
                         results.append(result)
+                    completed += 1
+                    # Progress güncelle
+                    progress_bar.progress(completed / total)
+                    status_text.text(f"📊 {completed}/{total} hisse analiz edildi...")
                 except Exception as e:
                     st.error(f"❌ {symbol} analizi başarısız: {str(e)}")
+                    completed += 1
+                    progress_bar.progress(completed / total)
     
+    progress_bar.empty()
+    status_text.empty()
     return results
 
 def calculate_stock_score(stock_data):
@@ -679,8 +698,8 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d", inves
                 else:
                     st.success("✅ Tüm hisseler için güncel modeller mevcut!")
             
-            # Analizi başlat
-            results = analyze_multiple_stocks(selected_symbols, config, interval=interval)
+            # Analizi başlat - Optimizasyon: Worker sayısı azaltıldı
+            results = analyze_multiple_stocks(selected_symbols, config, max_workers=3, interval=interval)
             
             if results:
                 # DataFrame oluştur

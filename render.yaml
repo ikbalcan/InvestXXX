@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: investxxx-streamlit
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run dashboard_main.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    disk:
+      name: investxxx-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+

@@ -21,7 +21,7 @@ def load_config():
     except:
         return {}
 
-@st.cache_data(ttl=300)  # 5 dakika cache
+@st.cache_data(ttl=3600)  # 1 saat cache - Optimizasyon: Daha uzun cache süresi
 def load_stock_data(symbol, period="1y", interval="1d", silent=False):
     """Hisse verisi yükler - API call ile cache'li
     
@@ -37,11 +37,11 @@ def load_stock_data(symbol, period="1y", interval="1d", silent=False):
         os.makedirs(cache_dir, exist_ok=True)
         cache_file = os.path.join(cache_dir, f"{symbol.replace('.IS', '')}_{interval}_cache.csv")
         
-        # Cache kontrolü
+        # Cache kontrolü - Optimizasyon: Daha uzun cache süresi (1 saat)
         if os.path.exists(cache_file):
             import time
             cache_age = time.time() - os.path.getmtime(cache_file)
-            if cache_age < 300:  # 5 dakikadan yeni
+            if cache_age < 3600:  # 1 saatten yeni - Optimizasyon: 5 dakikadan 1 saate çıkarıldı
                 try:
                     data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
                     if not silent:
@@ -78,19 +78,20 @@ def load_stock_data(symbol, period="1y", interval="1d", silent=False):
             st.sidebar.error(f"❌ Veri yükleme hatası {symbol}: {str(e)}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=1800)  # 30 dakika cache - Optimizasyon: Hisse analizi cache'leniyor
 def analyze_stock_characteristics(symbol, period="2y"):
     """Hisse karakteristiklerini analiz eder ve parametre önerileri döndürür"""
     try:
-        # Veri yükle
-        data = yf.download(symbol, period=period, progress=False)
+        # Veri yükle - Cache'li fonksiyon kullan
+        data = load_stock_data(symbol, period=period, silent=True)
         if data.empty:
             return None
             
-        # Temel istatistikler
-        returns = data['Close'].pct_change().dropna()
+        # Temel istatistikler - Kolon isimlerini küçük harf yapılmış olarak kullan
+        returns = data['close'].pct_change().dropna()
         volatility = float(returns.std() * np.sqrt(252))  # Yıllık volatilite
-        avg_volume = float(data['Volume'].mean())
-        price_range = float((data['Close'].max() - data['Close'].min()) / data['Close'].mean())
+        avg_volume = float(data['volume'].mean())
+        price_range = float((data['close'].max() - data['close'].min()) / data['close'].mean())
         
         # Volatilite kategorisi belirle
         if volatility <= 0.25:
@@ -107,8 +108,8 @@ def analyze_stock_characteristics(symbol, period="2y"):
             volatility_color = "darkred"
         
         # Trend analizi
-        sma_20 = data['Close'].rolling(20).mean()
-        sma_50 = data['Close'].rolling(50).mean()
+        sma_20 = data['close'].rolling(20).mean()
+        sma_50 = data['close'].rolling(50).mean()
         trend_strength = float(abs(sma_20.iloc[-1] - sma_50.iloc[-1]) / sma_50.iloc[-1])
         
         # Parametre önerileri (volatilite bazlı)

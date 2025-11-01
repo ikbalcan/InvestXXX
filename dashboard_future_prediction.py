@@ -20,7 +20,7 @@ from price_target_predictor import PriceTargetPredictor
 from dashboard_utils import load_config, load_stock_data
 from src.export_utils import create_export_buttons
 
-@st.cache_data
+@st.cache_data(ttl=1800)  # 30 dakika cache - Optimizasyon: Feature engineering cache'leniyor
 def create_features(data, config=None, interval="1d"):
     """Özellikler oluşturur"""
     try:

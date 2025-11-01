@@ -17,12 +17,13 @@ sys.path.append(os.path.dirname(__file__))
 from dashboard_utils import load_config, load_stock_data, analyze_stock_characteristics
 from dashboard_charts import plot_price_chart, plot_volume_chart, plot_technical_indicators
 
-@st.cache_data
-def create_features(data):
+@st.cache_data(ttl=1800)  # 30 dakika cache - Optimizasyon: Feature engineering cache'leniyor
+def create_features(data, config_hash=None):
     """Özellikler oluşturur"""
     try:
         from feature_engineering import FeatureEngineer
-        engineer = FeatureEngineer(load_config())
+        config = load_config()
+        engineer = FeatureEngineer(config)
         return engineer.create_all_features(data)
     except:
         return pd.DataFrame()

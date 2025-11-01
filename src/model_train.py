@@ -38,14 +38,34 @@ class StockDirectionPredictor:
         # Hedef değişkeni seç
         target_col = 'direction_binary'  # Binary classification
         
-        # Özellik kolonlarını belirle
-        exclude_cols = ['open', 'high', 'low', 'close', 'volume', 'adj_close',
-                       'future_price', 'future_return', 'direction', 'direction_binary',
-                       'future_return_vol_adj']
+        # Eğer model yüklüyse ve feature_columns zaten varsa, onları kullan
+        # Bu, modelin beklediği feature columns ile eşleşmeyi garanti eder
+        if self.feature_columns is not None and hasattr(self, 'model') and self.model is not None:
+            # Model yüklüyse, sadece modelin beklediği feature columns'ı kullan
+            # Yeni feature'ları (modelin beklediği listede olmayanları) filtrele
+            available_features = [col for col in self.feature_columns if col in features_df.columns]
+            missing_features = [col for col in self.feature_columns if col not in features_df.columns]
+            
+            if missing_features:
+                logger.warning(f"Modelin beklediği bazı feature'lar eksik: {missing_features}")
+                logger.warning(f"Kullanılabilir feature'lar: {available_features}")
+            
+            # Eksik feature'ları 0 ile doldur (NaN yerine)
+            for feature in missing_features:
+                features_df[feature] = 0
+            
+            # Modelin beklediği feature columns'ı kullan (yeni feature'ları dahil etme)
+            self.feature_columns = available_features + missing_features
+        else:
+            # Model yüklü değilse, normal şekilde feature columns belirle
+            # Özellik kolonlarını belirle
+            exclude_cols = ['open', 'high', 'low', 'close', 'volume', 'adj_close',
+                           'future_price', 'future_return', 'direction', 'direction_binary',
+                           'future_return_vol_adj']
+            
+            self.feature_columns = [col for col in features_df.columns if col not in exclude_cols]
         
-        self.feature_columns = [col for col in features_df.columns if col not in exclude_cols]
-        
-        # Veriyi hazırla
+        # Veriyi hazırla - Sadece modelin beklediği feature columns'ı kullan
         X = features_df[self.feature_columns].copy()
         y = features_df[target_col].copy()
         
@@ -61,7 +81,9 @@ class StockDirectionPredictor:
         y = y[mask]
         
         logger.info(f"Model için hazırlanan veri boyutu: {X.shape}")
-        logger.info(f"Hedef değişken dağılımı: {y.value_counts().to_dict()}")
+        logger.info(f"Kullanılan feature sayısı: {len(self.feature_columns)}")
+        if y is not None and len(y) > 0:
+            logger.info(f"Hedef değişken dağılımı: {y.value_counts().to_dict()}")
         
         return X, y
     
@@ -170,7 +192,7 @@ class StockDirectionPredictor:
             'reg_lambda': volatility_config.get('reg_lambda', 0.1),
             'scale_pos_weight': scale_pos_weight,  # Class imbalance için
             'random_state': 42,
-            'n_jobs': -1
+            'n_jobs': 1  # Optimizasyon: Ücretsiz sunucular için tek thread (kaynak sınırlaması)
         }
         
         logger.info(f"Volatilite bazlı parametreler: {xgb_params}")
