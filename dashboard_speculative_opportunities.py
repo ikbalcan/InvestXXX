@@ -55,8 +55,15 @@ def analyze_speculative_stock(symbol, config, period="1y", interval="1d", silent
                 config_with_interval['MODEL_CONFIG'] = {}
             config_with_interval['MODEL_CONFIG']['interval'] = interval
             
-            engineer = FeatureEngineer(config_with_interval)
-            features_df = engineer.create_all_features(data)
+            # DataLoader ve FeatureEngineer oluştur
+            loader = DataLoader(config_with_interval)
+            engineer = FeatureEngineer(config_with_interval, data_loader=loader)
+            
+            # BIST 100 endeks verisini yükle
+            index_data = loader.get_index_data(period="2y", interval=interval)
+            
+            # Özellikleri oluştur
+            features_df = engineer.create_all_features(data, index_data=index_data)
         except Exception as e:
             if not silent:
                 st.error(f"❌ {symbol} özellikler oluşturulamadı: {str(e)}")

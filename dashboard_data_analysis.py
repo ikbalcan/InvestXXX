@@ -19,13 +19,24 @@ from dashboard_charts import plot_price_chart, plot_volume_chart, plot_technical
 
 @st.cache_data(ttl=1800)  # 30 dakika cache - Optimizasyon: Feature engineering cache'leniyor
 def create_features(data, config_hash=None):
-    """Özellikler oluşturur"""
+    """Özellikler oluşturur (endeks verisi ile)"""
     try:
+        from data_loader import DataLoader
         from feature_engineering import FeatureEngineer
         config = load_config()
-        engineer = FeatureEngineer(config)
-        return engineer.create_all_features(data)
-    except:
+        
+        # DataLoader ve FeatureEngineer oluştur
+        loader = DataLoader(config)
+        engineer = FeatureEngineer(config, data_loader=loader)
+        
+        # BIST 100 endeks verisini yükle
+        index_data = loader.get_index_data(period="2y")
+        
+        # Özellikleri oluştur
+        return engineer.create_all_features(data, index_data=index_data)
+    except Exception as e:
+        import logging
+        logging.error(f"Feature oluşturma hatası: {str(e)}")
         return pd.DataFrame()
 
 def show_data_analysis_tab(selected_symbol, period="2y", interval="1d"):

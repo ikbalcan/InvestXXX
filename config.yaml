@@ -4,6 +4,10 @@
 DATA_SOURCES:
   twelve_data_api_key: "YOUR_TWELVE_DATA_API_KEY"
   yfinance_enabled: true
+
+# Piyasa Endeksleri
+MARKET_INDEX:
+  BIST100_SYMBOL: "XU100.IS"  # BIST 100 endeksi sembolü
   
 # Hedef Hisse Senetleri (BIST100'den örnekler)
 TARGET_STOCKS:

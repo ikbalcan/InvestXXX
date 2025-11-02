@@ -1,17 +1,23 @@
 [theme]
-primaryColor = "#667eea"
+primaryColor = "#28a745"
 backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
+secondaryBackgroundColor = "#f8f9fa"
+textColor = "#495057"
 font = "sans serif"
-
-[server]
-headless = true
-port = 8501
-enableCORS = false
-enableXsrfProtection = true
 
 [browser]
 gatherUsageStats = false
-serverAddress = "localhost"
 
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[ui]
+hideTopBar = false
+hideSidebarNav = false
+
+[client]
+showErrorDetails = true
+
+# Not: layout="wide" ayarı st.set_page_config() ile dashboard_main.py'de yapılıyor

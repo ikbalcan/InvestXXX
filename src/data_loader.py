@@ -19,6 +19,8 @@ class DataLoader:
         self.config = config
         self.data_dir = "data/raw"
         os.makedirs(self.data_dir, exist_ok=True)
+        # BIST 100 endeks sembolü
+        self.bist_index_symbol = config.get('MARKET_INDEX', {}).get('BIST100_SYMBOL', 'XU100.IS')
         
     def fetch_stock_data(self, symbol: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
         """
@@ -165,6 +167,83 @@ class DataLoader:
                     updated_data[symbol] = data
                     
         return updated_data
+    
+    def fetch_index_data(self, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
+        """
+        BIST 100 endeksi verisi çeker
+        
+        Args:
+            period: Veri periyodu ("1y", "2y", "5y", "max")
+            interval: Zaman dilimi ("1d", "1h", "4h", "1wk")
+            
+        Returns:
+            BIST 100 endeksi OHLCV verisi içeren DataFrame
+        """
+        try:
+            ticker = yf.Ticker(self.bist_index_symbol)
+            
+            # Interval parametresi ile veri çek
+            data = ticker.history(period=period, interval=interval)
+            
+            if data.empty:
+                logger.warning(f"BIST 100 endeks verisi bulunamadı: {self.bist_index_symbol}")
+                return pd.DataFrame()
+                
+            # Kolon isimlerini standardize et
+            data.columns = [col.lower() for col in data.columns]
+            data = data.rename(columns={'adj close': 'adj_close'})
+            
+            # Eksik değerleri temizle
+            data = data.dropna()
+            
+            logger.info(f"BIST 100 endeksi için {len(data)} {interval} veri yüklendi")
+            return data
+            
+        except Exception as e:
+            logger.error(f"BIST 100 endeks verisi yükleme hatası: {str(e)}")
+            return pd.DataFrame()
+    
+    def get_index_data(self, period: str = "2y", interval: str = "1d", use_cache: bool = True) -> pd.DataFrame:
+        """
+        BIST 100 endeksi verisini yükler (cache desteği ile)
+        
+        Args:
+            period: Veri periyodu
+            interval: Zaman dilimi
+            use_cache: Cache kullanılsın mı
+            
+        Returns:
+            BIST 100 endeksi DataFrame'i
+        """
+        cache_file = os.path.join(self.data_dir, f"XU100_index.csv")
+        
+        # Cache kontrolü
+        if use_cache and os.path.exists(cache_file):
+            try:
+                cached_data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+                # Cache'deki son tarihi kontrol et
+                last_date = cached_data.index.max()
+                days_diff = (datetime.now() - last_date).days
+                
+                # Cache 1 günden eskiyse güncelle
+                if days_diff < 1:
+                    logger.info("BIST 100 endeks verisi cache'den yüklendi")
+                    return cached_data
+            except Exception as e:
+                logger.warning(f"Cache okuma hatası: {str(e)}")
+        
+        # Veriyi çek
+        data = self.fetch_index_data(period, interval)
+        
+        # Cache'e kaydet
+        if not data.empty and use_cache:
+            try:
+                data.to_csv(cache_file)
+                logger.info(f"BIST 100 endeks verisi cache'e kaydedildi")
+            except Exception as e:
+                logger.warning(f"Cache kaydetme hatası: {str(e)}")
+        
+        return data
 
 def main():
     """Test fonksiyonu"""

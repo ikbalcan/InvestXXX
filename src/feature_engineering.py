@@ -6,15 +6,16 @@ Teknik analiz göstergeleri ve momentum özelliklerini oluşturur
 import pandas as pd
 import numpy as np
 import ta
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
 class FeatureEngineer:
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, data_loader=None):
         self.config = config
         self.lookback_window = config.get('MODEL_CONFIG', {}).get('lookback_window', 30)
+        self.data_loader = data_loader  # DataLoader instance (opsiyonel)
         # Volatilite analizi bilgilerini sakla
         self.volatility_info = {
             'volatility': None,
@@ -23,6 +24,8 @@ class FeatureEngineer:
             'threshold_up': None,
             'threshold_down': None
         }
+        # Endeks verisi cache
+        self._index_data_cache = None
         
     def create_technical_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -97,6 +100,167 @@ class FeatureEngineer:
         features_df['gap'] = (features_df['open'] - features_df['close'].shift(1)) / features_df['close'].shift(1)
         features_df['gap_up'] = np.where(features_df['gap'] > 0.02, 1, 0)  # %2+ gap up
         features_df['gap_down'] = np.where(features_df['gap'] < -0.02, 1, 0)  # %2+ gap down
+        
+        return features_df
+    
+    def create_index_features(self, df: pd.DataFrame, index_data: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+        """
+        BIST 100 endeksi ile ilgili özellikler oluşturur
+        
+        Args:
+            df: Hisse senedi DataFrame'i
+            index_data: BIST 100 endeks verisi (None ise data_loader'dan yüklenir)
+            
+        Returns:
+            Endeks özellikleri eklenmiş DataFrame
+        """
+        features_df = df.copy()
+        
+        # Endeks verisini yükle
+        if index_data is None:
+            if self.data_loader is None:
+                logger.warning("DataLoader bulunamadı, endeks özellikleri atlanıyor")
+                return features_df
+            
+            # Cache kontrolü
+            if self._index_data_cache is None:
+                try:
+                    # Hisse verisiyle aynı tarih aralığını kullan
+                    period = "2y"  # Varsayılan
+                    interval = self.config.get('MODEL_CONFIG', {}).get('interval', '1d')
+                    self._index_data_cache = self.data_loader.get_index_data(period=period, interval=interval)
+                except Exception as e:
+                    logger.error(f"Endeks verisi yüklenemedi: {str(e)}")
+                    return features_df
+            
+            index_data = self._index_data_cache
+        
+        if index_data.empty:
+            logger.warning("Endeks verisi boş, endeks özellikleri atlanıyor")
+            return features_df
+        
+        # Tarih uyumluluğunu sağla
+        # Her iki DataFrame'in de ortak tarihlerini bul
+        common_dates = df.index.intersection(index_data.index)
+        
+        if len(common_dates) == 0:
+            logger.warning("Hisse ve endeks verilerinde ortak tarih bulunamadı")
+            return features_df
+        
+        # Endeks verilerini hisse verisiyle birleştir
+        index_close = index_data.loc[common_dates, 'close']
+        index_returns = index_close.pct_change()
+        
+        # Hisse verilerini aynı tarihler için al
+        stock_close = df.loc[common_dates, 'close']
+        stock_returns = stock_close.pct_change()
+        
+        # 1. Beta (Rolling Beta) - Hisse ve endeks getirileri arasındaki ilişki
+        # Beta = Cov(stock_returns, index_returns) / Var(index_returns)
+        for window in [20, 60, 120]:
+            beta_values = []
+            for i in range(len(common_dates)):
+                if i < window:
+                    beta_values.append(np.nan)
+                else:
+                    stock_window = stock_returns.iloc[i-window:i]
+                    index_window = index_returns.iloc[i-window:i]
+                    # NaN değerleri temizle
+                    valid_mask = ~(stock_window.isna() | index_window.isna())
+                    if valid_mask.sum() < 10:  # Minimum 10 veri noktası
+                        beta_values.append(np.nan)
+                    else:
+                        stock_clean = stock_window[valid_mask]
+                        index_clean = index_window[valid_mask]
+                        if index_clean.var() > 0:
+                            beta = np.cov(stock_clean, index_clean)[0, 1] / index_clean.var()
+                            beta_values.append(beta)
+                        else:
+                            beta_values.append(np.nan)
+            
+            features_df[f'beta_{window}d'] = pd.Series(beta_values, index=common_dates).reindex(df.index)
+        
+        # 2. Rolling Correlation - Hisse ve endeks arasındaki korelasyon
+        for window in [20, 60, 120]:
+            corr_values = []
+            for i in range(len(common_dates)):
+                if i < window:
+                    corr_values.append(np.nan)
+                else:
+                    stock_window = stock_returns.iloc[i-window:i]
+                    index_window = index_returns.iloc[i-window:i]
+                    valid_mask = ~(stock_window.isna() | index_window.isna())
+                    if valid_mask.sum() < 10:
+                        corr_values.append(np.nan)
+                    else:
+                        stock_clean = stock_window[valid_mask]
+                        index_clean = index_window[valid_mask]
+                        corr = stock_clean.corr(index_clean)
+                        corr_values.append(corr if not np.isnan(corr) else 0)
+            
+            features_df[f'index_correlation_{window}d'] = pd.Series(corr_values, index=common_dates).reindex(df.index)
+        
+        # 3. Relative Strength - Hisse performansı vs Endeks performansı
+        for period in [5, 10, 20, 60]:
+            stock_perf = stock_returns.rolling(period).sum()
+            index_perf = index_returns.rolling(period).sum()
+            relative_strength = stock_perf - index_perf
+            features_df[f'relative_strength_{period}d'] = relative_strength.reindex(df.index)
+        
+        # 4. Divergence Detection - Hisse ve endeks ters hareket ettiğinde
+        # Pozitif divergence: Endeks düşerken hisse yükseliyor
+        # Negatif divergence: Endeks yükselirken hisse düşüyor
+        
+        # Momentum divergence (kısa vade) - Threshold ile daha güvenilir
+        stock_momentum_5d = stock_returns.rolling(5).sum()
+        index_momentum_5d = index_returns.rolling(5).sum()
+        
+        # Threshold: En az %1 hareket olmalı (gürültüyü filtrele)
+        momentum_threshold = 0.01  # %1
+        
+        # Pozitif divergence: Endeks belirgin düşerken hisse belirgin yükseliyor
+        positive_divergence = ((index_momentum_5d < -momentum_threshold) & (stock_momentum_5d > momentum_threshold)).astype(int)
+        features_df['positive_divergence_5d'] = positive_divergence.reindex(df.index, fill_value=0)
+        
+        # Negatif divergence: Endeks belirgin yükselirken hisse belirgin düşüyor
+        negative_divergence = ((index_momentum_5d > momentum_threshold) & (stock_momentum_5d < -momentum_threshold)).astype(int)
+        features_df['negative_divergence_5d'] = negative_divergence.reindex(df.index, fill_value=0)
+        
+        # 20 günlük divergence - Daha uzun vadeli ve güvenilir
+        stock_momentum_20d = stock_returns.rolling(20).sum()
+        index_momentum_20d = index_returns.rolling(20).sum()
+        # 20 günlük için daha yumuşak threshold (%0.5)
+        momentum_threshold_20d = 0.005  # %0.5
+        positive_divergence_20d = ((index_momentum_20d < -momentum_threshold_20d) & (stock_momentum_20d > momentum_threshold_20d)).astype(int)
+        negative_divergence_20d = ((index_momentum_20d > momentum_threshold_20d) & (stock_momentum_20d < -momentum_threshold_20d)).astype(int)
+        features_df['positive_divergence_20d'] = positive_divergence_20d.reindex(df.index, fill_value=0)
+        features_df['negative_divergence_20d'] = negative_divergence_20d.reindex(df.index, fill_value=0)
+        
+        # 5. Endeks Momentum ve Volatilite Özellikleri
+        index_momentum_5d = index_returns.rolling(5).sum()
+        index_momentum_20d = index_returns.rolling(20).sum()
+        index_volatility_20d = index_returns.rolling(20).std()
+        
+        features_df['index_momentum_5d'] = index_momentum_5d.reindex(df.index)
+        features_df['index_momentum_20d'] = index_momentum_20d.reindex(df.index)
+        features_df['index_volatility_20d'] = index_volatility_20d.reindex(df.index)
+        
+        # 6. Hisse/Endeks Fiyat Oranı (normalize edilmiş)
+        price_ratio = stock_close / index_close
+        price_ratio_normalized = (price_ratio - price_ratio.rolling(60).mean()) / price_ratio.rolling(60).std()
+        features_df['price_vs_index_ratio'] = price_ratio.reindex(df.index)
+        features_df['price_vs_index_ratio_normalized'] = price_ratio_normalized.reindex(df.index)
+        
+        # 7. Endeks RSI ve MACD
+        index_rsi = ta.momentum.rsi(index_close)
+        index_macd = ta.trend.macd(index_close)
+        index_macd_signal = ta.trend.macd_signal(index_close)
+        
+        features_df['index_rsi'] = index_rsi.reindex(df.index)
+        features_df['index_macd'] = index_macd.reindex(df.index)
+        features_df['index_macd_diff'] = (index_macd - index_macd_signal).reindex(df.index)
+        
+        logger.info(f"Endeks özellikleri oluşturuldu: {len([col for col in features_df.columns if 'index' in col or 'beta' in col or 'divergence' in col or 'relative' in col])} özellik")
         
         return features_df
     
@@ -312,12 +476,13 @@ class FeatureEngineer:
         
         return features_df
     
-    def create_all_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def create_all_features(self, df: pd.DataFrame, index_data: Optional[pd.DataFrame] = None) -> pd.DataFrame:
         """
         Tüm özellikleri oluşturur
         
         Args:
             df: Ham OHLCV verisi
+            index_data: BIST 100 endeks verisi (opsiyonel)
             
         Returns:
             Tüm özelliklerle zenginleştirilmiş DataFrame
@@ -327,6 +492,9 @@ class FeatureEngineer:
         
         logger.info("Momentum özellikleri oluşturuluyor...")
         features_df = self.create_momentum_features(features_df)
+        
+        logger.info("Endeks özellikleri oluşturuluyor...")
+        features_df = self.create_index_features(features_df, index_data)
         
         logger.info("Zaman özellikleri oluşturuluyor...")
         features_df = self.create_time_features(features_df)
@@ -355,7 +523,7 @@ class FeatureEngineer:
         # Hedef değişkenleri ve ham fiyat verilerini çıkar
         exclude_cols = ['open', 'high', 'low', 'close', 'volume', 'adj_close',
                        'future_price', 'future_return', 'direction', 'direction_binary',
-                       'future_return_vol_adj']
+                       'future_return_vol_adj', 'price_vs_index_ratio']  # price_vs_index_ratio ham fiyat içeriyor
         
         feature_cols = [col for col in df.columns if col not in exclude_cols]
         

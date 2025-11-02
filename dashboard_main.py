@@ -11,11 +11,20 @@ import sys
 import os
 from datetime import datetime
 
+# Streamlit sayfa konfigürasyonu - TÜM Streamlit komutlarından ÖNCE olmalı
+st.set_page_config(
+    page_title="Hisse Senedi Yön Tahmini",
+    page_icon="📈",
+    layout="wide",  # Tam genişlik
+    initial_sidebar_state="expanded"
+)
+
 # Proje modüllerini import et
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 sys.path.append(os.path.dirname(__file__))
 
 # Tab modüllerini import et
+from dashboard_landing import show_landing_page
 from dashboard_data_analysis import show_data_analysis_tab
 from dashboard_future_prediction import show_future_prediction_tab
 from dashboard_model_training import show_model_training_tab
@@ -32,14 +41,6 @@ from src.bist_symbols_loader import get_extended_bist_symbols, add_user_symbol
 
 def main():
     """Ana dashboard"""
-    
-    # Streamlit sayfa konfigürasyonu - Tam genişlik
-    st.set_page_config(
-        page_title="Hisse Senedi Yön Tahmini",
-        page_icon="📈",
-        layout="wide",  # Tam genişlik
-        initial_sidebar_state="expanded"
-    )
     
     # CSS stilleri - UI/UX İyileştirmeleri
     st.markdown("""
@@ -496,8 +497,8 @@ def main():
     search_term = st.sidebar.text_input(
         "🔍 Hisse Ara:",
         value="",
-        placeholder="örn: THYAO, MEGMT, AKBNK...",
-        help="Hisse kodunu yazın (örn: MEGMT) veya aşağıdan seçin"
+        placeholder="örn: THYAO, AKBNK...",
+        help="Hisse kodunu yazın (örn: THYAO) veya aşağıdan seçin"
     )
     
     # Arama sonuçlarını filtrele
@@ -670,47 +671,64 @@ def main():
         help="Teknik analiz için zaman dilimini seçin"
     )
     
-    # Sekmeler - ilişkilere göre yeniden düzenlendi
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        "📊 Veri Analizi",
-        "📑 Temel Analiz",
-        "🔮 Tahmin Karar",
-        "🎯 Hisse Avcısı",
-        "🚀 Dar Tahta Fırsatlar",
+    # Sekmeler - yeniden düzenlendi: Gruplandırılmış yapı
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🏠 Ana Sayfa",
+        "📊 Analiz",
+        "🔮 Tahmin & Fırsatlar",
         "🤖 Portföy Yöneticisi",
         "📘 Rehber",
         "🔧 Model Eğitimi"
     ])
     
     with tab1:
-        # 📊 Veri Analizi - Sadece hisse analizi ve veri
-        show_data_analysis_tab(selected_symbol, period, interval)
+        # 🏠 Ana Sayfa - Landing page ve bilgilendirme
+        show_landing_page()
     
     with tab2:
-        # 📑 Temel Analiz - Finansal tablolar ve oranlar
-        show_fundamental_analysis_tab(selected_symbol)
+        # 📊 Analiz - Teknik ve Temel analiz alt tab'ları
+        analysis_subtab1, analysis_subtab2 = st.tabs([
+            "📈 Teknik",
+            "📑 Temel"
+        ])
+        
+        with analysis_subtab1:
+            # 📈 Teknik Analiz - Veri analizi içeriği
+            show_data_analysis_tab(selected_symbol, period, interval)
+        
+        with analysis_subtab2:
+            # 📑 Temel Analiz - Finansal tablolar ve oranlar
+            show_fundamental_analysis_tab(selected_symbol)
     
     with tab3:
-        # 🔮 Tahmin Karar - Doğrudan gelecek tahmin içeriği
-        show_future_prediction_tab(selected_symbol, config, interval=interval, investment_horizon=selected_investment_horizon)
+        # 🔮 Tahmin & Fırsatlar - Gelecek tahmini, Hisse avcısı ve Dar tahta fırsatları
+        prediction_subtab1, prediction_subtab2, prediction_subtab3 = st.tabs([
+            "🔮 Gelecek Tahmini",
+            "🎯 Hisse Avcısı",
+            "🚀 Dar Tahta Fırsatları"
+        ])
+        
+        with prediction_subtab1:
+            # 🔮 Gelecek Tahmini - Doğrudan gelecek tahmin içeriği
+            show_future_prediction_tab(selected_symbol, config, interval=interval, investment_horizon=selected_investment_horizon)
+        
+        with prediction_subtab2:
+            # 🎯 Hisse Avcısı - Toplu analiz ve karşılaştırma
+            show_stock_hunter_tab(bist_stocks, all_symbols, config, interval=interval, investment_horizon=selected_investment_horizon)
+        
+        with prediction_subtab3:
+            # 🚀 Dar Tahta Fırsatları - Dar tahtalı ve aşırı yükselme potansiyeli olan hisseler
+            show_speculative_opportunities_tab(bist_stocks, all_symbols, config, interval=interval, investment_horizon=selected_investment_horizon)
     
     with tab4:
-        # 🎯 Hisse Avcısı - Toplu analiz ve karşılaştırma
-        show_stock_hunter_tab(bist_stocks, all_symbols, config, interval=interval, investment_horizon=selected_investment_horizon)
-    
-    with tab5:
-        # 🚀 Dar Tahta Fırsatlar - Dar tahtalı ve aşırı yükselme potansiyeli olan hisseler
-        show_speculative_opportunities_tab(bist_stocks, all_symbols, config, interval=interval, investment_horizon=selected_investment_horizon)
-    
-    with tab6:
         # 🤖 Robot Portföy Yöneticisi - Günlük yatırım kararları
         show_portfolio_manager_tab(config, interval=interval, investment_horizon=selected_investment_horizon)
     
-    with tab7:
+    with tab5:
         # 📘 Rehber - Teknik ve Temel Analiz Bilgi Merkezi
         show_guide_tab()
 
-    with tab8:
+    with tab6:
         # 🔧 Model Eğitimi - Ayarlar niteliğinde
         show_model_training_tab(all_symbols)
 

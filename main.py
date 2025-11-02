@@ -44,7 +44,7 @@ class StockPredictionSystem:
         
         # Modülleri başlat
         self.data_loader = DataLoader(self.config)
-        self.feature_engineer = FeatureEngineer(self.config)
+        self.feature_engineer = FeatureEngineer(self.config, data_loader=self.data_loader)
         self.predictor = StockDirectionPredictor(self.config)
         self.backtester = Backtester(self.config)
         self.paper_trader = PaperTrader(self.config)
@@ -78,12 +78,16 @@ class StockPredictionSystem:
             logger.error("Veri yüklenemedi!")
             return None
         
+        # BIST 100 endeks verisini yükle (tüm hisseler için ortak)
+        logger.info("BIST 100 endeks verisi yükleniyor...")
+        index_data = self.data_loader.get_index_data(period=period)
+        
         # Özellikleri oluştur ve birleştir
         all_features = []
         
         for symbol, data in all_data.items():
             logger.info(f"Özellikler oluşturuluyor: {symbol}")
-            features_df = self.feature_engineer.create_all_features(data)
+            features_df = self.feature_engineer.create_all_features(data, index_data=index_data)
             
             if not features_df.empty:
                 features_df['symbol'] = symbol
@@ -131,6 +135,10 @@ class StockPredictionSystem:
         
         all_results = {}
         
+        # BIST 100 endeks verisini yükle (tüm hisseler için ortak)
+        logger.info("BIST 100 endeks verisi yükleniyor...")
+        index_data = self.data_loader.get_index_data(period="2y")
+        
         for symbol in symbols:
             logger.info(f"Backtest çalıştırılıyor: {symbol}")
             
@@ -142,7 +150,7 @@ class StockPredictionSystem:
                 continue
             
             # Özellikleri oluştur
-            features_df = self.feature_engineer.create_all_features(data)
+            features_df = self.feature_engineer.create_all_features(data, index_data=index_data)
             
             if features_df.empty:
                 logger.warning(f"Özellik oluşturulamadı: {symbol}")

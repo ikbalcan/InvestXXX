@@ -46,7 +46,7 @@ BIST_ALL_SYMBOLS = [
     'ISDMR.IS', 'GEDZA.IS', 'RAYSG.IS',
     
     # Ek yaygın hisseler (A-Z)
-    'ADANA.IS', 'ADGYO.IS', 'AGHOL.IS', 'AGYO.IS', 'AKCNS.IS', 'AKFYE.IS',
+    'ADGYO.IS', 'AGHOL.IS', 'AGYO.IS', 'AKCNS.IS', 'AKFYE.IS',
     'AKGRT.IS', 'AKSA.IS', 'AKSEN.IS', 'ALARK.IS', 'ALFAS.IS', 'ALGYO.IS',
     'ALKIM.IS', 'ALTIN.IS', 'ANACM.IS', 'ANELE.IS', 'ANELT.IS', 'ANGEN.IS',
     'ARENA.IS', 'ARZIN.IS', 'ASELS.IS', 'ASTOR.IS', 'ATAGY.IS', 'ATATP.IS',

@@ -22,7 +22,7 @@ from src.export_utils import create_export_buttons
 
 @st.cache_data(ttl=1800)  # 30 dakika cache - Optimizasyon: Feature engineering cache'leniyor
 def create_features(data, config=None, interval="1d"):
-    """Özellikler oluşturur"""
+    """Özellikler oluşturur (endeks verisi ile)"""
     try:
         if config is None:
             config = load_config()
@@ -32,9 +32,18 @@ def create_features(data, config=None, interval="1d"):
             config['MODEL_CONFIG'] = {}
         config['MODEL_CONFIG']['interval'] = interval
         
-        engineer = FeatureEngineer(config)
-        return engineer.create_all_features(data)
-    except:
+        # DataLoader ve FeatureEngineer oluştur
+        loader = DataLoader(config)
+        engineer = FeatureEngineer(config, data_loader=loader)
+        
+        # BIST 100 endeks verisini yükle
+        index_data = loader.get_index_data(period="2y", interval=interval)
+        
+        # Özellikleri oluştur
+        return engineer.create_all_features(data, index_data=index_data)
+    except Exception as e:
+        import logging
+        logging.error(f"Feature oluşturma hatası: {str(e)}")
         return pd.DataFrame()
 
 def remove_duplicate_factors(factors):
@@ -258,6 +267,136 @@ def analyze_prediction_factors(data, features_df, prediction, confidence, model_
             else:
                 factors['negative'].append(f"Williams %R aşırı satım ({williams_r:.1f}) - Risk")
     
+    # 13. BIST 100 Endeks Analizi - YENİ!
+    # Beta analizi
+    if 'beta_20d' in features_df.columns:
+        beta = last_data['beta_20d']
+        if pd.notna(beta):
+            if beta > 1.2:
+                # Yüksek volatilite - yükseliş tahmini için pozitif, düşüş tahmini için negatif
+                if prediction == 1:
+                    factors['positive'].append(f"📊 Beta {beta:.2f} - Yüksek volatilite, endeksten %{(beta-1)*100:.0f} daha fazla hareket - Güçlü yükseliş potansiyeli")
+                else:
+                    factors['negative'].append(f"📊 Beta {beta:.2f} - Yüksek volatilite, endeksten %{(beta-1)*100:.0f} daha fazla hareket - Güçlü düşüş riski")
+            elif beta < 0.8:
+                # Düşük volatilite - stabil ama daha az hareket
+                if prediction == 1:
+                    factors['negative'].append(f"📊 Beta {beta:.2f} - Düşük volatilite, endeksten %{(1-beta)*100:.0f} daha az hareket - Sınırlı yükseliş potansiyeli")
+                else:
+                    factors['positive'].append(f"📊 Beta {beta:.2f} - Düşük volatilite, endeksten %{(1-beta)*100:.0f} daha az hareket - Daha az düşüş riski")
+            else:
+                factors['neutral'].append(f"📊 Beta {beta:.2f} - Endeksle benzer volatilite")
+    
+    # Korelasyon analizi
+    if 'index_correlation_20d' in features_df.columns:
+        correlation = last_data['index_correlation_20d']
+        if pd.notna(correlation):
+            if correlation > 0.7:
+                if prediction == 1:
+                    factors['positive'].append(f"🔗 BIST 100 ile güçlü pozitif korelasyon ({correlation:.2f}) - Birlikte yükseliş bekleniyor")
+                else:
+                    factors['negative'].append(f"🔗 BIST 100 ile güçlü pozitif korelasyon ({correlation:.2f}) - Birlikte düşüş riski")
+            elif correlation < -0.3:
+                factors['positive'].append(f"🔗 BIST 100 ile negatif korelasyon ({correlation:.2f}) - Ters hareket, bağımsız trend")
+            else:
+                factors['neutral'].append(f"🔗 BIST 100 ile zayıf korelasyon ({correlation:.2f}) - Bağımsız hareket")
+    
+    # Relative Strength analizi
+    if 'relative_strength_20d' in features_df.columns:
+        rel_strength = last_data['relative_strength_20d']
+        if pd.notna(rel_strength):
+            if rel_strength > 0.05:  # %5'ten fazla
+                if prediction == 1:
+                    factors['positive'].append(f"💪 Relative Strength: %{rel_strength*100:.1f} - Hisse endeksten çok daha güçlü!")
+                else:
+                    factors['negative'].append(f"💪 Relative Strength: %{rel_strength*100:.1f} - Güçlü ama düşüş riski")
+            elif rel_strength < -0.05:  # %5'ten fazla negatif
+                if prediction == 0:
+                    factors['positive'].append(f"📉 Relative Strength: %{rel_strength*100:.1f} - Hisse endeksten çok daha zayıf")
+                else:
+                    factors['negative'].append(f"📉 Relative Strength: %{rel_strength*100:.1f} - Zayıf, yükseliş zor")
+            else:
+                factors['neutral'].append(f"📊 Relative Strength: %{rel_strength*100:.1f} - Endeksle benzer performans")
+    
+    # Divergence analizi - ÖNEMLİ! (20 günlük öncelikli, daha güvenilir)
+    pos_div = 0
+    neg_div = 0
+    div_period = None
+    
+    # Önce 20 günlük divergence kontrol et (daha güvenilir)
+    if 'positive_divergence_20d' in features_df.columns:
+        pos_div_val = last_data['positive_divergence_20d']
+        try:
+            pos_div = int(pos_div_val) if pd.notna(pos_div_val) else 0
+        except (ValueError, TypeError):
+            pos_div = 0
+        div_period = 20
+        
+        neg_div_val = last_data.get('negative_divergence_20d', 0) if 'negative_divergence_20d' in features_df.columns else 0
+        try:
+            neg_div = int(neg_div_val) if pd.notna(neg_div_val) else 0
+        except (ValueError, TypeError):
+            neg_div = 0
+    # 20 günlük yoksa 5 günlük kullan
+    elif 'positive_divergence_5d' in features_df.columns:
+        pos_div_val = last_data['positive_divergence_5d']
+        try:
+            pos_div = int(pos_div_val) if pd.notna(pos_div_val) else 0
+        except (ValueError, TypeError):
+            pos_div = 0
+        div_period = 5
+        
+        neg_div_val = last_data.get('negative_divergence_5d', 0) if 'negative_divergence_5d' in features_df.columns else 0
+        try:
+            neg_div = int(neg_div_val) if pd.notna(neg_div_val) else 0
+        except (ValueError, TypeError):
+            neg_div = 0
+    
+    if pos_div == 1:
+        if prediction == 1:
+            factors['positive'].append(f"⬆️ Pozitif Divergence ({div_period}g): Endeks düşerken hisse yükseliyor - Modelle uyumlu")
+        else:
+            factors['negative'].append(f"⚠️ ÇELİŞKİ: Pozitif divergence var ama model SAT diyor - Dikkatli olunmalı! ({div_period}g)")
+    elif neg_div == 1:
+        if prediction == 0:
+            factors['positive'].append(f"⬇️ Negatif Divergence ({div_period}g): Endeks yükselirken hisse düşüyor - Modelle uyumlu")
+        else:
+            factors['negative'].append(f"⚠️ ÇELİŞKİ: Negatif divergence var ama model AL diyor - Dikkatli olunmalı! ({div_period}g)")
+    
+    # Endeks momentum analizi
+    if 'index_momentum_20d' in features_df.columns:
+        index_momentum = last_data['index_momentum_20d']
+        stock_momentum = last_data.get('momentum_20d', 0) if 'momentum_20d' in features_df.columns else 0
+        
+        if pd.notna(index_momentum):
+            if index_momentum > 0.05:  # Endeks güçlü yükselişte
+                if prediction == 1:
+                    factors['positive'].append(f"📈 BIST 100 güçlü yükselişte (%{index_momentum*100:.1f}) - Piyasa desteği var")
+                else:
+                    factors['negative'].append(f"📈 BIST 100 yükselişte ama hisse düşüş bekleniyor - Divergence!")
+            elif index_momentum < -0.05:  # Endeks güçlü düşüşte
+                if prediction == 0:
+                    factors['positive'].append(f"📉 BIST 100 güçlü düşüşte (%{index_momentum*100:.1f}) - Piyasa desteği var")
+                else:
+                    factors['negative'].append(f"📉 BIST 100 düşüşte ama hisse yükseliş bekleniyor - Dikkat!")
+            else:
+                factors['neutral'].append(f"📊 BIST 100 stabil (%{index_momentum*100:.1f}) - Nötr piyasa")
+    
+    # Endeks RSI analizi
+    if 'index_rsi' in features_df.columns:
+        index_rsi = last_data['index_rsi']
+        if pd.notna(index_rsi):
+            if index_rsi < 30:
+                factors['neutral'].append(f"📊 BIST 100 RSI aşırı satım ({index_rsi:.1f}) - Genel piyasa desteği bekleniyor")
+            elif index_rsi > 70:
+                factors['neutral'].append(f"📊 BIST 100 RSI aşırı alım ({index_rsi:.1f}) - Genel piyasa düzeltmesi riski")
+            else:
+                factors['neutral'].append(f"📊 BIST 100 RSI normal ({index_rsi:.1f})")
+    
+    # 14. (Eski 13) CCI Analizi
+    if 'cci' in features_df.columns:
+                factors['negative'].append(f"Williams %R aşırı satım ({williams_r:.1f}) - Risk")
+    
     # 13. CCI (Commodity Channel Index) Analizi
     if 'cci' in features_df.columns:
         cci = last_data['cci']
@@ -425,8 +564,15 @@ def train_model_for_symbol(symbol, config, progress_callback=None, interval="1d"
             config_with_interval['MODEL_CONFIG']['interval'] = interval
             config_with_interval['MODEL_CONFIG']['investment_horizon'] = investment_horizon
             
-            engineer = FeatureEngineer(config_with_interval)
-            features_df = engineer.create_all_features(data)
+            # DataLoader ve FeatureEngineer oluştur
+            loader = DataLoader(config_with_interval)
+            engineer = FeatureEngineer(config_with_interval, data_loader=loader)
+            
+            # BIST 100 endeks verisini yükle
+            index_data = loader.get_index_data(period="2y", interval=interval)
+            
+            # Özellikleri oluştur
+            features_df = engineer.create_all_features(data, index_data=index_data)
         except Exception as e:
             return False, f"{symbol} özellikler oluşturulamadı: {str(e)}"
         
@@ -943,6 +1089,184 @@ def show_future_prediction_tab(selected_symbol, config, interval="1d", investmen
                             
                             with col4:
                                 st.metric("📈 Risk/Getiri", f"{price_targets['risk_reward_ratio']:.2f}")
+                            
+                            # BIST 100 Endeks Bilgileri - YENİ BÖLÜM!
+                            st.markdown("---")
+                            st.subheader("📊 BIST 100 Endeks Analizi")
+                            st.info("💡 Hissenin BIST 100 endeksi ile ilişkisini görün")
+                            
+                            index_col1, index_col2, index_col3, index_col4 = st.columns(4)
+                            
+                            # Beta
+                            if 'beta_20d' in features_df.columns:
+                                beta_val = features_df['beta_20d'].iloc[-1]
+                                if pd.notna(beta_val):
+                                    with index_col1:
+                                        if beta_val > 1.2:
+                                            beta_status = "Yüksek Volatil"
+                                            beta_explanation = f"Beta {beta_val:.2f}: Hisse endeksten %{(beta_val-1)*100:.0f} daha fazla hareket ediyor. Endeks %1 yükselirse hisse %{beta_val:.2f} yükselir."
+                                            beta_color = "🔴"
+                                        elif beta_val < 0.8:
+                                            beta_status = "Düşük Volatil"
+                                            beta_explanation = f"Beta {beta_val:.2f}: Hisse endeksten %{(1-beta_val)*100:.0f} daha az hareket ediyor. Endeks %1 yükselirse hisse %{beta_val:.2f} yükselir."
+                                            beta_color = "🟢"
+                                        else:
+                                            beta_status = "Normal"
+                                            beta_explanation = f"Beta {beta_val:.2f}: Hisse endeksle benzer hareket ediyor. Endeks %1 yükselirse hisse yaklaşık %{beta_val:.2f} yükselir."
+                                            beta_color = "🟡"
+                                        st.metric("📊 Beta (20 gün)", beta_status, delta=f"{beta_val:.2f}", delta_color="normal")
+                                        st.caption(f"ℹ️ {beta_explanation}")
+                            
+                            # Korelasyon - Daha uzun vadeli kullan (60 veya 120 gün)
+                            corr_val = None
+                            corr_period = None
+                            if 'index_correlation_120d' in features_df.columns:
+                                corr_val = features_df['index_correlation_120d'].iloc[-1]
+                                corr_period = 120
+                            elif 'index_correlation_60d' in features_df.columns:
+                                corr_val = features_df['index_correlation_60d'].iloc[-1]
+                                corr_period = 60
+                            elif 'index_correlation_20d' in features_df.columns:
+                                corr_val = features_df['index_correlation_20d'].iloc[-1]
+                                corr_period = 20
+                            
+                            if corr_val is not None and pd.notna(corr_val):
+                                with index_col2:
+                                    if corr_val >= 0.7:  # >= ile 0.70 dahil
+                                        corr_status = "Güçlü Pozitif"
+                                        corr_explanation = f"Korelasyon {corr_val:.2f} ({corr_period} gün): Hisse ve endeks birlikte hareket ediyor. Endeks yükselirse hisse de yükselir, endeks düşerse hisse de düşer."
+                                        corr_color = "🟢"
+                                    elif corr_val <= -0.3:
+                                        corr_status = "Negatif"
+                                        corr_explanation = f"Korelasyon {corr_val:.2f} ({corr_period} gün): Hisse ve endeks ters hareket ediyor. Endeks yükselirse hisse düşer, endeks düşerse hisse yükselir."
+                                        corr_color = "🔴"
+                                    else:
+                                        corr_status = "Zayıf"
+                                        corr_explanation = f"Korelasyon {corr_val:.2f} ({corr_period} gün): Hisse ve endeks arasında zayıf ilişki var. Bağımsız hareket edebilir."
+                                        corr_color = "🟡"
+                                    st.metric(f"🔗 Korelasyon ({corr_period} gün)", corr_status, delta=f"{corr_val:.2f}", delta_color="normal")
+                                    st.caption(f"ℹ️ {corr_explanation}")
+                            
+                            # Relative Strength
+                            if 'relative_strength_20d' in features_df.columns:
+                                rs_val = features_df['relative_strength_20d'].iloc[-1]
+                                if pd.notna(rs_val):
+                                    with index_col3:
+                                        rs_pct = rs_val * 100
+                                        if rs_val > 0.05:
+                                            rs_status = "Güçlü"
+                                            rs_explanation = f"Relative Strength %{rs_pct:.1f}: Hisse son 20 günde endeksten %{rs_pct:.1f} daha iyi performans gösterdi. Güçlü hisse!"
+                                            rs_delta_color = "normal"
+                                        elif rs_val < -0.05:
+                                            rs_status = "Zayıf"
+                                            rs_explanation = f"Relative Strength %{rs_pct:.1f}: Hisse son 20 günde endeksten %{abs(rs_pct):.1f} daha kötü performans gösterdi. Zayıf hisse."
+                                            rs_delta_color = "inverse"
+                                        else:
+                                            rs_status = "Benzer"
+                                            rs_explanation = f"Relative Strength %{rs_pct:.1f}: Hisse ve endeks benzer performans gösterdi. Nötr durum."
+                                            rs_delta_color = "off"
+                                        st.metric("💪 Relative Strength (20 gün)", rs_status, delta=f"%{rs_pct:.1f}", delta_color=rs_delta_color)
+                                        st.caption(f"ℹ️ {rs_explanation}")
+                            
+                            # Divergence - 20 günlük kullan (daha güvenilir)
+                            pos_div = 0
+                            neg_div = 0
+                            div_period = None
+                            
+                            # Önce 20 günlük divergence kontrol et (daha güvenilir)
+                            if 'positive_divergence_20d' in features_df.columns:
+                                pos_div_val = features_df['positive_divergence_20d'].iloc[-1]
+                                try:
+                                    pos_div = int(pos_div_val) if pd.notna(pos_div_val) else 0
+                                except (ValueError, TypeError):
+                                    pos_div = 0
+                                div_period = 20
+                                
+                                if 'negative_divergence_20d' in features_df.columns:
+                                    neg_div_val = features_df['negative_divergence_20d'].iloc[-1]
+                                    try:
+                                        neg_div = int(neg_div_val) if pd.notna(neg_div_val) else 0
+                                    except (ValueError, TypeError):
+                                        neg_div = 0
+                            # 20 günlük yoksa 5 günlük kullan
+                            elif 'positive_divergence_5d' in features_df.columns:
+                                pos_div_val = features_df['positive_divergence_5d'].iloc[-1]
+                                try:
+                                    pos_div = int(pos_div_val) if pd.notna(pos_div_val) else 0
+                                except (ValueError, TypeError):
+                                    pos_div = 0
+                                div_period = 5
+                                
+                                if 'negative_divergence_5d' in features_df.columns:
+                                    neg_div_val = features_df['negative_divergence_5d'].iloc[-1]
+                                    try:
+                                        neg_div = int(neg_div_val) if pd.notna(neg_div_val) else 0
+                                    except (ValueError, TypeError):
+                                        neg_div = 0
+                            
+                            with index_col4:
+                                if pos_div == 1:
+                                    div_status = "⬆️ Pozitif"
+                                    div_explanation = f"Pozitif Divergence ({div_period} gün): Endeks düşerken hisse yükseliyor. Bu hissenin endeksten bağımsız güçlü olabileceğini gösterir. DİKKAT: Model tahmini ile çelişebilir!"
+                                    div_delta = "Modelle çelişki ⚠️"
+                                    div_delta_color = "off"
+                                elif neg_div == 1:
+                                    div_status = "⬇️ Negatif"
+                                    div_explanation = f"Negatif Divergence ({div_period} gün): Endeks yükselirken hisse düşüyor. Bu hissenin zayıf olabileceğini gösterir. DİKKAT: Model tahmini ile çelişebilir!"
+                                    div_delta = "Modelle çelişki ⚠️"
+                                    div_delta_color = "off"
+                                else:
+                                    div_status = "➡️ Yok"
+                                    div_explanation = f"Divergence Yok ({div_period} gün): Hisse ve endeks birlikte hareket ediyor. Model tahmini ile uyumlu."
+                                    div_delta = "Uyumlu ✓"
+                                    div_delta_color = "normal"
+                                st.metric(f"⚡ Divergence ({div_period} gün)", div_status, delta=div_delta, delta_color=div_delta_color)
+                                st.caption(f"ℹ️ {div_explanation}")
+                            
+                            # Endeks momentum ve RSI detayları
+                            if 'index_momentum_20d' in features_df.columns or 'index_rsi' in features_df.columns:
+                                st.markdown("---")
+                                detail_col1, detail_col2 = st.columns(2)
+                                
+                                with detail_col1:
+                                    if 'index_momentum_20d' in features_df.columns:
+                                        index_mom = features_df['index_momentum_20d'].iloc[-1]
+                                        if pd.notna(index_mom):
+                                            if index_mom > 0.05:
+                                                mom_status = f"📈 Güçlü Yükseliş (%{index_mom*100:.1f})"
+                                                mom_color = "success"
+                                            elif index_mom < -0.05:
+                                                mom_status = f"📉 Güçlü Düşüş (%{index_mom*100:.1f})"
+                                                mom_color = "error"
+                                            else:
+                                                mom_status = f"📊 Stabil (%{index_mom*100:.1f})"
+                                                mom_color = "info"
+                                            if mom_color == "success":
+                                                st.success(f"**BIST 100 Momentum (20 gün):** {mom_status}")
+                                            elif mom_color == "error":
+                                                st.error(f"**BIST 100 Momentum (20 gün):** {mom_status}")
+                                            else:
+                                                st.info(f"**BIST 100 Momentum (20 gün):** {mom_status}")
+                                
+                                with detail_col2:
+                                    if 'index_rsi' in features_df.columns:
+                                        index_rsi_val = features_df['index_rsi'].iloc[-1]
+                                        if pd.notna(index_rsi_val):
+                                            if index_rsi_val < 30:
+                                                rsi_status = f"📊 Aşırı Satım ({index_rsi_val:.1f})"
+                                                rsi_color = "success"
+                                            elif index_rsi_val > 70:
+                                                rsi_status = f"📊 Aşırı Alım ({index_rsi_val:.1f})"
+                                                rsi_color = "error"
+                                            else:
+                                                rsi_status = f"📊 Normal ({index_rsi_val:.1f})"
+                                                rsi_color = "info"
+                                            if rsi_color == "success":
+                                                st.success(f"**BIST 100 RSI:** {rsi_status}")
+                                            elif rsi_color == "error":
+                                                st.error(f"**BIST 100 RSI:** {rsi_status}")
+                                            else:
+                                                st.info(f"**BIST 100 RSI:** {rsi_status}")
                             
                             # Destek/Direnç Seviyeleri - Detaylı Analiz
                             st.subheader("🎯 Destek/Direnç Seviyeleri")

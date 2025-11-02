@@ -78,6 +78,35 @@ def load_stock_data(symbol, period="1y", interval="1d", silent=False):
             st.sidebar.error(f"❌ Veri yükleme hatası {symbol}: {str(e)}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=1800)  # 30 dakika cache - Optimizasyon: Feature engineering cache'leniyor
+def create_features_with_index(data, config=None, interval="1d"):
+    """Özellikler oluşturur (endeks verisi ile)"""
+    try:
+        from data_loader import DataLoader
+        from feature_engineering import FeatureEngineer
+        
+        if config is None:
+            config = load_config()
+        
+        # Interval'ı config'e ekle
+        if 'MODEL_CONFIG' not in config:
+            config['MODEL_CONFIG'] = {}
+        config['MODEL_CONFIG']['interval'] = interval
+        
+        # DataLoader ve FeatureEngineer oluştur
+        loader = DataLoader(config)
+        engineer = FeatureEngineer(config, data_loader=loader)
+        
+        # BIST 100 endeks verisini yükle
+        index_data = loader.get_index_data(period="2y", interval=interval)
+        
+        # Özellikleri oluştur
+        return engineer.create_all_features(data, index_data=index_data)
+    except Exception as e:
+        import logging
+        logging.error(f"Feature oluşturma hatası: {str(e)}")
+        return pd.DataFrame()
+
 @st.cache_data(ttl=1800)  # 30 dakika cache - Optimizasyon: Hisse analizi cache'leniyor
 def analyze_stock_characteristics(symbol, period="2y"):
     """Hisse karakteristiklerini analiz eder ve parametre önerileri döndürür"""

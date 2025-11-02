@@ -60,8 +60,15 @@ def analyze_single_stock(symbol, config, period="1y", interval="1d", silent=Fals
                 config_with_interval['MODEL_CONFIG'] = {}
             config_with_interval['MODEL_CONFIG']['interval'] = interval
             
-            engineer = FeatureEngineer(config_with_interval)
-            features_df = engineer.create_all_features(data)
+            # DataLoader ve FeatureEngineer oluştur
+            loader = DataLoader(config_with_interval)
+            engineer = FeatureEngineer(config_with_interval, data_loader=loader)
+            
+            # BIST 100 endeks verisini yükle
+            index_data = loader.get_index_data(period="1y", interval=interval)
+            
+            # Özellikleri oluştur
+            features_df = engineer.create_all_features(data, index_data=index_data)
         except Exception as e:
             st.error(f"❌ {symbol} özellikler oluşturulamadı: {str(e)}")
             return None
@@ -86,6 +93,13 @@ def analyze_single_stock(symbol, config, period="1y", interval="1d", silent=Fals
         rsi = features_df['rsi'].iloc[-1] if 'rsi' in features_df.columns else 50
         macd = features_df['macd'].iloc[-1] if 'macd' in features_df.columns else 0
         macd_signal = features_df['macd_signal'].iloc[-1] if 'macd_signal' in features_df.columns else 0
+        
+        # BIST 100 Endeks Bilgileri - YENİ!
+        beta_20d = features_df['beta_20d'].iloc[-1] if 'beta_20d' in features_df.columns else None
+        index_correlation_20d = features_df['index_correlation_20d'].iloc[-1] if 'index_correlation_20d' in features_df.columns else None
+        relative_strength_20d = features_df['relative_strength_20d'].iloc[-1] if 'relative_strength_20d' in features_df.columns else None
+        positive_divergence_5d = features_df['positive_divergence_5d'].iloc[-1] if 'positive_divergence_5d' in features_df.columns else 0
+        negative_divergence_5d = features_df['negative_divergence_5d'].iloc[-1] if 'negative_divergence_5d' in features_df.columns else 0
         
         # Trend analizi
         sma_20 = features_df['sma_20'].iloc[-1] if 'sma_20' in features_df.columns else current_price
@@ -200,7 +214,13 @@ def analyze_single_stock(symbol, config, period="1y", interval="1d", silent=Fals
             'prediction': prediction,
             'confidence': confidence,
             'price_target': price_target,
-            'data_points': len(data)
+            'data_points': len(data),
+            # BIST 100 Endeks Bilgileri - YENİ!
+            'beta_20d': beta_20d,
+            'index_correlation_20d': index_correlation_20d,
+            'relative_strength_20d': relative_strength_20d,
+            'positive_divergence_5d': positive_divergence_5d,
+            'negative_divergence_5d': negative_divergence_5d
         }
         
     except Exception as e:
@@ -832,6 +852,34 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d", inves
                     display_df['RSI'] = display_df['rsi'].round(1)
                     display_df['Trend'] = display_df['trend_strength']
                     
+                    # BIST 100 Endeks Bilgileri - YENİ!
+                    if 'beta_20d' in display_df.columns:
+                        display_df['Beta'] = display_df['beta_20d'].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+                    if 'index_correlation_20d' in display_df.columns:
+                        def format_correlation(corr):
+                            if pd.isna(corr) or corr is None:
+                                return "N/A"
+                            if corr > 0.7:
+                                return f"🟢 {corr:.2f}"
+                            elif corr < -0.3:
+                                return f"🔴 {corr:.2f}"
+                            else:
+                                return f"🟡 {corr:.2f}"
+                        display_df['BIST Korelasyon'] = display_df['index_correlation_20d'].apply(format_correlation)
+                    if 'relative_strength_20d' in display_df.columns:
+                        display_df['Relative Strength'] = display_df['relative_strength_20d'].apply(
+                            lambda x: f"%{x*100:+.1f}" if pd.notna(x) else "N/A"
+                        )
+                    if 'positive_divergence_5d' in display_df.columns and 'negative_divergence_5d' in display_df.columns:
+                        def format_divergence(row):
+                            if row['positive_divergence_5d'] == 1:
+                                return "⬆️ Pozitif"
+                            elif row['negative_divergence_5d'] == 1:
+                                return "⬇️ Negatif"
+                            else:
+                                return "➡️ Yok"
+                        display_df['Divergence'] = display_df.apply(format_divergence, axis=1)
+                    
                     # AI tahminleri
                     display_df['AI Sinyal'] = display_df.apply(lambda x: 
                         f"{'🟢 AL' if x['prediction'] == 1 else '🔴 SAT' if x['prediction'] == 0 else '⚪ N/A'}", axis=1)
@@ -877,8 +925,22 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d", inves
                     display_df['Skor Kategori'] = display_df['score'].apply(categorize_score)
                     
                     # Tablo göster
-                    table_columns = ['symbol', 'Fiyat', '1Hafta %', 'Skor Kategori', 'Skor', 
-                                   'AI Sinyal', 'AI Güven', 'Risk', 'RSI', 'Hedef Fiyat']
+                    # Endeks kolonlarını varsa ekle
+                    base_columns = ['symbol', 'Fiyat', '1Hafta %', 'Skor Kategori', 'Skor', 
+                                   'AI Sinyal', 'AI Güven', 'Risk', 'RSI']
+                    
+                    # Endeks kolonlarını kontrol et ve ekle
+                    index_columns = []
+                    if 'Beta' in display_df.columns:
+                        index_columns.append('Beta')
+                    if 'BIST Korelasyon' in display_df.columns:
+                        index_columns.append('BIST Korelasyon')
+                    if 'Relative Strength' in display_df.columns:
+                        index_columns.append('Relative Strength')
+                    if 'Divergence' in display_df.columns:
+                        index_columns.append('Divergence')
+                    
+                    table_columns = base_columns + index_columns + ['Hedef Fiyat']
                     
                     st.dataframe(
                         display_df[table_columns],
@@ -924,6 +986,27 @@ def show_stock_hunter_tab(bist_stocks, all_symbols, config, interval="1d", inves
                             st.write(f"RSI: {stock['rsi']:.1f}")
                             st.write(f"Trend: {stock['trend_strength']}")
                             st.write(f"Hacim Oranı: {stock['volume_ratio']:.2f}x")
+                            
+                            # BIST 100 Endeks Bilgileri - YENİ!
+                            st.markdown("**📊 BIST 100 Analizi**")
+                            if 'beta_20d' in stock and pd.notna(stock.get('beta_20d')):
+                                beta_val = stock['beta_20d']
+                                st.write(f"Beta: {beta_val:.2f} {'(Yüksek Volatil)' if beta_val > 1.2 else '(Düşük Volatil)' if beta_val < 0.8 else '(Normal)'}")
+                            if 'index_correlation_20d' in stock and pd.notna(stock.get('index_correlation_20d')):
+                                corr_val = stock['index_correlation_20d']
+                                if corr_val > 0.7:
+                                    st.write(f"Korelasyon: 🟢 {corr_val:.2f} (Güçlü Pozitif)")
+                                elif corr_val < -0.3:
+                                    st.write(f"Korelasyon: 🔴 {corr_val:.2f} (Negatif)")
+                                else:
+                                    st.write(f"Korelasyon: 🟡 {corr_val:.2f} (Zayıf)")
+                            if 'relative_strength_20d' in stock and pd.notna(stock.get('relative_strength_20d')):
+                                rs_val = stock['relative_strength_20d']
+                                st.write(f"Relative Strength: %{rs_val*100:+.1f}")
+                            if 'positive_divergence_5d' in stock and stock.get('positive_divergence_5d') == 1:
+                                st.write("Divergence: ⬆️ Pozitif (Güçlü AL sinyali!)")
+                            elif 'negative_divergence_5d' in stock and stock.get('negative_divergence_5d') == 1:
+                                st.write("Divergence: ⬇️ Negatif (Güçlü SAT sinyali!)")
                         
                         with col3:
                             st.markdown("**🤖 AI Tahmini**")

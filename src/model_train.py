@@ -401,13 +401,16 @@ def main():
     
     # Veri yükle ve özellik oluştur
     loader = DataLoader(config)
-    engineer = FeatureEngineer(config)
+    engineer = FeatureEngineer(config, data_loader=loader)
     
     # Test verisi
     data = loader.fetch_stock_data("THYAO.IS", "2y")
     
+    # BIST 100 endeks verisini yükle
+    index_data = loader.get_index_data(period="2y")
+    
     if not data.empty:
-        features_df = engineer.create_all_features(data)
+        features_df = engineer.create_all_features(data, index_data=index_data)
         
         # Model oluştur ve eğit
         predictor = StockDirectionPredictor(config)
