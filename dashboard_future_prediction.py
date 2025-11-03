@@ -945,11 +945,38 @@ def show_future_prediction_tab(selected_symbol, config, interval="1d", investmen
                                 X, y = predictor.prepare_data(features_df)
                                 predictions, probabilities = predictor.predict(X)
                                 
-                                # Son tahmin
+                                # Son tahmin (ham)
                                 last_prediction = predictions[-1]
                                 last_confidence = np.max(probabilities[-1])
                                 last_prob_up = probabilities[-1][1]
                                 last_prob_down = probabilities[-1][0]
+
+                                # Karar istikrarı: son N olasılığın ortalaması ile margin uygula
+                                recent_window = min(5, len(probabilities))
+                                if recent_window > 1:
+                                    import numpy as _np
+                                    recent_probs_up = [p[1] for p in probabilities[-recent_window:]]
+                                    avg_prob_up = float(_np.mean(recent_probs_up))
+                                else:
+                                    avg_prob_up = float(last_prob_up)
+
+                                # Histerezis/margin: flip-flop'ı azalt
+                                upper_margin = 0.55
+                                lower_margin = 0.45
+                                if avg_prob_up >= upper_margin:
+                                    stable_prediction = 1
+                                    stable_confidence = avg_prob_up
+                                elif avg_prob_up <= lower_margin:
+                                    stable_prediction = 0
+                                    stable_confidence = 1.0 - avg_prob_up
+                                else:
+                                    # Nötr bölge: son ham tahmini koru ama güveni düşür
+                                    stable_prediction = int(last_prediction)
+                                    stable_confidence = max(abs(avg_prob_up - 0.5) * 2, 0.0)
+
+                                # Ekranda kullanılacak değeri stabilize edilmiş kararla değiştir
+                                last_prediction = stable_prediction
+                                last_confidence = stable_confidence
                                 
                                 # Son fiyat
                                 last_price = data['close'].iloc[-1]

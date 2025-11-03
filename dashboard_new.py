@@ -27,6 +27,14 @@ from price_target_predictor import PriceTargetPredictor
 from dashboard_utils import load_config, load_stock_data, analyze_stock_characteristics, get_auto_params
 from dashboard_charts import plot_price_chart, plot_volume_chart, plot_technical_indicators
 
+# Sayfa konfigürasyonu - ilk Streamlit komutu olmalı
+st.set_page_config(
+    page_title="Hisse Senedi Yön Tahmini",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 @st.cache_data
 def create_features(data):
     """Özellikler oluşturur"""
@@ -38,14 +46,6 @@ def create_features(data):
 
 def main():
     """Ana dashboard"""
-    
-    # Streamlit sayfa konfigürasyonu - Tam genişlik
-    st.set_page_config(
-        page_title="Hisse Senedi Yön Tahmini",
-        page_icon="📈",
-        layout="wide",  # Tam genişlik
-        initial_sidebar_state="expanded"
-    )
     
     # Başlık
     st.markdown('<h1 class="main-header">📈 Hisse Senedi Yön Tahmini Sistemi</h1>', 

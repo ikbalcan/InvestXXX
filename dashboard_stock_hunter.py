@@ -136,9 +136,29 @@ def analyze_single_stock(symbol, config, period="1y", interval="1d", silent=Fals
                     X, y = predictor.prepare_data(features_df)
                     predictions, probabilities = predictor.predict(X)
                     
-                    # AI model tahmini
-                    prediction = predictions[-1]
-                    confidence = np.max(probabilities[-1])
+                    # AI model tahmini (stabilize edilmiş)
+                    raw_prediction = predictions[-1]
+                    raw_confidence = np.max(probabilities[-1])
+
+                    # Son N olasılığın ortalaması ile margin uygula (flip-flop azaltma)
+                    recent_window = min(5, len(probabilities))
+                    if recent_window > 1:
+                        recent_probs_up = [p[1] for p in probabilities[-recent_window:]]
+                        avg_prob_up = float(np.mean(recent_probs_up))
+                    else:
+                        avg_prob_up = float(probabilities[-1][1])
+
+                    upper_margin = 0.55
+                    lower_margin = 0.45
+                    if avg_prob_up >= upper_margin:
+                        prediction = 1
+                        confidence = avg_prob_up
+                    elif avg_prob_up <= lower_margin:
+                        prediction = 0
+                        confidence = 1.0 - avg_prob_up
+                    else:
+                        prediction = int(raw_prediction)
+                        confidence = max(abs(avg_prob_up - 0.5) * 2, 0.0)
                     
                     # Hedef fiyat hesapla
                     price_predictor = PriceTargetPredictor(config)

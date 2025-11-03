@@ -34,6 +34,7 @@ logging.basicConfig(
     ]
 )
 
+
 logger = logging.getLogger(__name__)
 
 class StockPredictionSystem:
@@ -330,5 +331,10 @@ if __name__ == "__main__":
         run_dashboard()
     except Exception as e:
         logger.error(f"Could not run dashboard: {e}")
-        # Fallback to CLI
-        main()
+        # Fallback to CLI only if CLI args are provided
+        import sys as _sys
+        if len(_sys.argv) > 1:
+            main()
+        else:
+            # No CLI args provided; avoid argparse error and exit gracefully
+            logger.info("No CLI arguments provided; exiting without invoking CLI parser.")

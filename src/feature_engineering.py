@@ -237,13 +237,31 @@ class FeatureEngineer:
         features_df['negative_divergence_20d'] = negative_divergence_20d.reindex(df.index, fill_value=0)
         
         # 5. Endeks Momentum ve Volatilite Özellikleri
+        # NOT: index_momentum pozitif = endeks yükselişte (AL için pozitif sinyal)
+        #      index_momentum negatif = endeks düşüşte (SAT için pozitif sinyal)
         index_momentum_5d = index_returns.rolling(5).sum()
         index_momentum_20d = index_returns.rolling(20).sum()
         index_volatility_20d = index_returns.rolling(20).std()
         
+        # Endeks momentum özelliklerini ekle (model için doğru yönde)
         features_df['index_momentum_5d'] = index_momentum_5d.reindex(df.index)
         features_df['index_momentum_20d'] = index_momentum_20d.reindex(df.index)
         features_df['index_volatility_20d'] = index_volatility_20d.reindex(df.index)
+        
+        # Ek olarak: Endeks momentum'un normalize edilmiş versiyonları
+        # Bu, modelin endeks momentum'unu daha iyi yorumlamasına yardımcı olur
+        # Pozitif momentum = pozitif değer (AL sinyali için)
+        # Negatif momentum = negatif değer (SAT sinyali için)
+        # Normalize: -1 ile 1 arasında değerler
+        if len(index_momentum_5d) > 0 and index_momentum_5d.std() > 0:
+            features_df['index_momentum_5d_normalized'] = (index_momentum_5d / index_momentum_5d.abs().rolling(60).mean()).reindex(df.index)
+        else:
+            features_df['index_momentum_5d_normalized'] = 0
+        
+        if len(index_momentum_20d) > 0 and index_momentum_20d.std() > 0:
+            features_df['index_momentum_20d_normalized'] = (index_momentum_20d / index_momentum_20d.abs().rolling(60).mean()).reindex(df.index)
+        else:
+            features_df['index_momentum_20d_normalized'] = 0
         
         # 6. Hisse/Endeks Fiyat Oranı (normalize edilmiş)
         price_ratio = stock_close / index_close
