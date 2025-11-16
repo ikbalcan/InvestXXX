@@ -2,7 +2,17 @@
 Hisse Senedi Yön Tahmini Sistemi - Ana Dashboard
 """
 
+# Streamlit sayfa konfigürasyonu - TÜM import'lardan ve Streamlit komutlarından ÖNCE olmalı
 import streamlit as st
+
+st.set_page_config(
+    page_title="Hisse Senedi Yön Tahmini",
+    page_icon="📈",
+    layout="wide",  # Tam genişlik
+    initial_sidebar_state="expanded"
+)
+
+# Diğer import'lar st.set_page_config() çağrısından SONRA
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -10,14 +20,6 @@ import plotly.graph_objects as go
 import sys
 import os
 from datetime import datetime
-
-# Streamlit sayfa konfigürasyonu - TÜM Streamlit komutlarından ÖNCE olmalı
-st.set_page_config(
-    page_title="Hisse Senedi Yön Tahmini",
-    page_icon="📈",
-    layout="wide",  # Tam genişlik
-    initial_sidebar_state="expanded"
-)
 
 # Proje modüllerini import et
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))

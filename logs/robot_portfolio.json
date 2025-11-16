@@ -1,37 +1,53 @@
 {
-  "cash": 200000,
+  "cash": 0,
   "stocks": {
-    "MGROS.IS": {
-      "quantity": 450,
-      "avg_cost": 454.5
-    },
     "PETKM.IS": {
-      "quantity": 11956,
+      "quantity": 5978,
       "avg_cost": 17.0
     },
-    "ULKER.IS": {
-      "quantity": 2000,
-      "avg_cost": 106.1
-    },
     "PGSUS.IS": {
-      "quantity": 459,
-      "avg_cost": 206.0
-    },
-    "FONET.IS": {
-      "quantity": 27817,
-      "avg_cost": 3.3
+      "quantity": 627,
+      "avg_cost": 207.61
     },
     "AKBNK.IS": {
       "quantity": 1668,
-      "avg_cost": 59.55
+      "avg_cost": 59.95
     },
     "SAHOL.IS": {
       "quantity": 1854,
       "avg_cost": 80.0
     },
     "TKFEN.IS": {
-      "quantity": 1000,
-      "avg_cost": 84.2
+      "quantity": 1671,
+      "avg_cost": 82.51
+    },
+    "THYAO.IS": {
+      "quantity": 406,
+      "avg_cost": 287.28
+    },
+    "FONET.IS": {
+      "quantity": 39957,
+      "avg_cost": 2.81
+    },
+    "ASELS.IS": {
+      "quantity": 272,
+      "avg_cost": 184.8
+    },
+    "VESTL.IS": {
+      "quantity": 4217,
+      "avg_cost": 34.21
+    },
+    "ARCLK.IS": {
+      "quantity": 1145,
+      "avg_cost": 113.55
+    },
+    "PAMEL.IS": {
+      "quantity": 1063,
+      "avg_cost": 95.8
+    },
+    "TCELL.IS": {
+      "quantity": 1166,
+      "avg_cost": 96.5
     }
   }
 }

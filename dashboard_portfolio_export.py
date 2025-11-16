@@ -118,10 +118,12 @@ def create_portfolio_recommendations_export(recommendations, portfolio, export_d
             doc.add_paragraph()
     
     # 3. POZİSYON ARTIRIMLARI
-    if increase_actions:
+    # Sadece nakit varsa ve işlem tutarı > 0 olanları göster
+    increase_actions_filtered = [r for r in increase_actions if r.get('recommended_value', 0) > 0]
+    if increase_actions_filtered:
         doc.add_heading('📈 3. POZİSYON ARTIRIMLARI', level=1)
         
-        for idx, rec in enumerate(increase_actions, 1):
+        for idx, rec in enumerate(increase_actions_filtered, 1):
             doc.add_heading(f'{idx}. {rec["symbol"]}', level=2)
             
             doc.add_paragraph(f'Mevcut Pozisyon: {rec["quantity"]:.0f} adet')
@@ -163,7 +165,7 @@ def create_portfolio_recommendations_export(recommendations, portfolio, export_d
     # İŞLEM ÖZETİ
     doc.add_heading('📊 İşlem Özeti', level=1)
     
-    total_buy = sum([r['recommended_value'] for r in buy_actions + increase_actions])
+    total_buy = sum([r['recommended_value'] for r in buy_actions + increase_actions_filtered])
     total_sell = sum([r['recommended_value'] for r in sell_actions])
     net_cash = total_cash + total_sell - total_buy
     

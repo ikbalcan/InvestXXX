@@ -26,13 +26,8 @@ from dashboard_utils import load_config, load_stock_data
 from src.fundamentals_loader import load_fundamentals
 from src.bist_symbols_loader import get_extended_bist_symbols, add_user_symbol
 
-# Sayfa konfigürasyonu - ilk Streamlit komutu olmalı
-st.set_page_config(
-    page_title="Hisse Senedi Yön Tahmini - Spekülatif Fırsatlar",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Not: st.set_page_config() çağrısı dashboard_main.py'de yapılıyor
+# Bu dosya bir modül olarak import edildiği için burada çağrılmamalı
 
 @st.cache_data(ttl=300)  # 5 dakika cache
 def load_stock_data_cached(symbol, period="1y", interval="1d", silent=False):

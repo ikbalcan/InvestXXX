@@ -21,3 +21,4 @@ hideSidebarNav = false
 showErrorDetails = true
 
 # Not: layout="wide" ayarı st.set_page_config() ile dashboard_main.py'de yapılıyor
+# Wide mode'un kalıcı olması için st.set_page_config() çağrısı uygulamanın en başında olmalıdır
